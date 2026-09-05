@@ -62,6 +62,7 @@ export function ProjectView({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [menu, setMenu] = useState(false);
+  const [confirmando, setConfirmando] = useState(false);
 
   const load = useCallback(async () => {
     const [d, c] = await Promise.all([
@@ -76,12 +77,16 @@ export function ProjectView({
     setInstructions(project.instructions ?? '');
     setEditingInstructions(false);
     setMenu(false);
+    setConfirmando(false);
     void load();
   }, [project.id, project.instructions, load]);
 
   useEffect(() => {
     if (!menu) return;
-    const cerrar = () => setMenu(false);
+    const cerrar = () => {
+      setMenu(false);
+      setConfirmando(false);
+    };
     window.addEventListener('click', cerrar);
     return () => window.removeEventListener('click', cerrar);
   }, [menu]);
@@ -89,16 +94,14 @@ export function ProjectView({
   /**
    * Borrar el proyecto no se lleva por delante sus conversaciones: el servidor
    * las saca del proyecto y siguen en el historial. Aun asi se pregunta, que es
-   * lo unico irreversible de esta pantalla.
+   * lo unico irreversible de esta pantalla — pero en el propio menu, con un
+   * segundo clic, en vez de con un `confirm` del navegador: la ventanita del
+   * sistema bloquea la pagina entera y ni siquiera dice lo que va a pasar con
+   * las conversaciones.
    */
   async function borrar() {
     setMenu(false);
-    const cuantas = convs.length;
-    const aviso = cuantas
-      ? `Borrar el proyecto "${project.name}"? Sus ${cuantas} conversaciones no se borran: vuelven a la lista general.`
-      : `Borrar el proyecto "${project.name}"?`;
-    if (!confirm(aviso)) return;
-
+    setConfirmando(false);
     setBusy(true);
     try {
       const res = await fetch(`/api/projects/${project.id}`, { method: 'DELETE' });
@@ -174,13 +177,30 @@ export function ProjectView({
               </button>
 
               {menu && (
-                <div className="pop" style={{ right: 0, top: 32 }}>
+                <div className="pop" style={{ right: 0, top: 32 }} onClick={(e) => e.stopPropagation()}>
                   <button className="pop-item" onClick={() => void renombrar()}>
                     <Pencil /> Renombrar
                   </button>
-                  <button className="pop-item danger" onClick={() => void borrar()}>
-                    <Trash /> Borrar proyecto
-                  </button>
+
+                  {confirmando ? (
+                    <>
+                      <p className="pop-note">
+                        {convs.length
+                          ? `Sus ${convs.length} conversaciones no se borran: vuelven a la lista general.`
+                          : 'No tiene conversaciones.'}
+                      </p>
+                      <button className="pop-item danger" disabled={busy} onClick={() => void borrar()}>
+                        <Trash /> Si, borrar "{project.name}"
+                      </button>
+                      <button className="pop-item" onClick={() => setConfirmando(false)}>
+                        Cancelar
+                      </button>
+                    </>
+                  ) : (
+                    <button className="pop-item danger" onClick={() => setConfirmando(true)}>
+                      <Trash /> Borrar proyecto
+                    </button>
+                  )}
                 </div>
               )}
             </div>

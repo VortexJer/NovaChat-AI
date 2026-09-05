@@ -2335,3 +2335,13 @@ button {
 .project-title h1 {
   margin: 0;
 }
+
+/* La advertencia dentro del menu, antes de confirmar algo irreversible. */
+.pop-note {
+  margin: 2px 0 4px;
+  padding: 0 10px;
+  max-width: 15rem;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-3);
+}
