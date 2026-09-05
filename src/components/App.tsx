@@ -466,13 +466,27 @@ export function App({ user }: { user: { id: string; email: string } }) {
       // Ademas se pinta en cada fotograma, no en uno de cada tres: lo que
       // cuesta es reparsear el Markdown, y de eso ya se encarga `StreamingBody`
       // dejando fuera el parrafo en curso.
-      const HORIZONTE = 0.35; // segundos para vaciar lo que haya pendiente
+      const HORIZONTE = 0.6; // segundos para vaciar lo pendiente
       const MINIMO = 90; // caracteres por segundo, para que un goteo no se pare
 
       let textQueue = '';
       let shownText = '';
       let frame: number | null = null;
       let ultimo = 0;
+
+      /**
+       * Hay respuestas que no se escriben: se entregan.
+       *
+       * Una tabla, un bloque de codigo o la nota que acompaña a un archivo no
+       * ganan nada apareciendo letra a letra — la tabla se recoloca en cada
+       * fotograma mientras le llegan columnas, y el archivo ya esta hecho antes
+       * de que empiece a escribirse la frase. En cuanto se ve que la respuesta
+       * es de ese tipo se deja de dosificar y sale entera.
+       */
+      let instantaneo = false;
+
+      const esEntrega = (texto: string) =>
+        texto.includes('```') || /(^|\n)\s*\|/.test(texto) || /(^|\n)\s*\|?\s*-{3,}/.test(texto);
 
       const drain = (ahora: number) => {
         frame = null;
@@ -496,8 +510,22 @@ export function App({ user }: { user: { id: string; email: string } }) {
         frame = requestAnimationFrame(drain);
       };
 
+      const volcar = () => {
+        if (frame !== null) cancelAnimationFrame(frame);
+        frame = null;
+        if (!textQueue) return;
+        shownText += textQueue;
+        textQueue = '';
+        setPending((prev) => (prev ? { ...prev, content: shownText } : prev));
+      };
+
       const queueText = (chunk: string) => {
         textQueue += chunk;
+        if (!instantaneo && esEntrega(shownText + textQueue)) instantaneo = true;
+        if (instantaneo) {
+          volcar();
+          return;
+        }
         if (frame === null) frame = requestAnimationFrame(drain);
       };
 
@@ -618,6 +646,12 @@ export function App({ user }: { user: { id: string; email: string } }) {
             } else if (event.t === 'done') {
               doneMeta = { id: event.id, reply_to: event.reply_to, version_index: event.version_index };
             } else if (event.t === 'tool') {
+              // Si el turno ha creado un archivo, lo que se escriba despues es
+              // la nota que lo acompaña: sale de golpe, con el archivo.
+              if (String(event.name).startsWith('crear_')) {
+                instantaneo = true;
+                volcar();
+              }
               const step: TraceStep = { id: event.id, name: event.name, args: event.args };
               finalTrace = [...finalTrace, step];
               setPending((p) => (p ? { ...p, trace: finalTrace } : p));
