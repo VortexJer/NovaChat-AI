@@ -278,6 +278,18 @@ export function App({ user }: { user: { id: string; email: string } }) {
     });
   }
 
+  /** Saca la conversacion del proyecto sin borrarla: vuelve a la lista por fechas. */
+  async function detachConversation(id: string) {
+    setMenuFor(null);
+    setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, project_id: null } : c)));
+    await fetch(`/api/conversations/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: null }),
+    });
+    void loadProjects();
+  }
+
   async function removeConversation(id: string) {
     setMenuFor(null);
     setConversations((prev) => prev.filter((c) => c.id !== id));
@@ -393,6 +405,7 @@ export function App({ user }: { user: { id: string; email: string } }) {
       const controller = new AbortController();
       abortRef.current = controller;
       let doneMeta: { id: string; reply_to?: string | null; version_index?: number } | null = null;
+      let abortado = false;
 
       // Copia local de lo que se va acumulando en `pending`, para poder
       // construir el mensaje final sin leer el estado desde dentro de otro
@@ -405,36 +418,50 @@ export function App({ user }: { user: { id: string; email: string } }) {
 
       // Amortiguador de escritura.
       //
-      // El router no entrega los tokens a ritmo constante: manda rafagas y
-      // luego se queda callado, asi que el texto salia a trompicones. Y
-      // pintar en cada token era ademas cuadratico — `Markdown` reparsea el
-      // mensaje entero cada vez, asi que cuanto mas largo, mas caro cada
-      // token. Aqui los deltas se acumulan y se vuelcan en cada fotograma,
-      // drenando una fraccion de lo pendiente: una rafaga se reparte en unos
-      // pocos fotogramas en vez de aparecer de golpe, un goteo lento sale
-      // igual que antes, y los repintados quedan acotados a los del monitor
-      // en vez de uno por token.
+      // El router no entrega los tokens a ritmo constante: manda una rafaga de
+      // varios cientos de caracteres y luego se calla uno o dos segundos. Sin
+      // amortiguar, eso se ve como saltos: un bloque de golpe, parado, otro
+      // bloque. Aqui los deltas entran en una cola y salen a ritmo constante.
+      //
+      // La clave es que el ritmo se calcula por **tiempo transcurrido**, no
+      // por fraccion de lo pendiente. Drenar un cuarto de la cola en cada
+      // repintado —lo que se hacia antes— vacia deprisa al principio y se
+      // arrastra al final, que es justo el tiron que se veia. Ahora se vacia
+      // lo pendiente en una ventana fija: si llegan 600 caracteres de golpe
+      // salen a 1.700 por segundo durante 350 ms, y si llegan de dos en dos
+      // salen al minimo, sin parones.
+      //
+      // Ademas se pinta en cada fotograma, no en uno de cada tres: lo que
+      // cuesta es reparsear el Markdown, y de eso ya se encarga `StreamingBody`
+      // dejando fuera el parrafo en curso.
+      const HORIZONTE = 0.35; // segundos para vaciar lo que haya pendiente
+      const MINIMO = 90; // caracteres por segundo, para que un goteo no se pare
+
       let textQueue = '';
       let shownText = '';
       let frame: number | null = null;
+      let ultimo = 0;
 
-      // Un fotograma de cada tres: a 60 Hz no hace falta repintar tan seguido
-      // para que se vea fluido, y cada repintado cuesta un reparseo del ultimo
-      // parrafo. Con esto el trabajo baja a un tercio sin que se note.
-      let tick = 0;
-
-      const drain = () => {
+      const drain = (ahora: number) => {
         frame = null;
-        if (!textQueue) return;
-        if (tick++ % 3 !== 0) {
-          frame = requestAnimationFrame(drain);
+        if (!textQueue) {
+          ultimo = 0;
           return;
         }
-        const step = Math.max(6, Math.ceil(textQueue.length / 4));
-        shownText += textQueue.slice(0, step);
-        textQueue = textQueue.slice(step);
+
+        // Un fotograma perdido (pestaña en segundo plano) no debe soltar un
+        // bloque entero de golpe: el salto se limita a 100 ms.
+        const dt = ultimo ? Math.min((ahora - ultimo) / 1000, 0.1) : 1 / 60;
+        ultimo = ahora;
+
+        const ritmo = Math.max(MINIMO, textQueue.length / HORIZONTE);
+        const paso = Math.max(1, Math.round(ritmo * dt));
+
+        shownText += textQueue.slice(0, paso);
+        textQueue = textQueue.slice(paso);
         setPending((prev) => (prev ? { ...prev, content: shownText } : prev));
-        if (textQueue) frame = requestAnimationFrame(drain);
+
+        frame = requestAnimationFrame(drain);
       };
 
       const queueText = (chunk: string) => {
@@ -442,15 +469,42 @@ export function App({ user }: { user: { id: string; email: string } }) {
         if (frame === null) frame = requestAnimationFrame(drain);
       };
 
-      /** Al terminar (o al abortar) se vuelca lo que quede, sin esperar fotogramas. */
-      const flushText = () => {
-        if (frame !== null) cancelAnimationFrame(frame);
-        frame = null;
-        if (!textQueue) return;
-        shownText += textQueue;
-        textQueue = '';
-        setPending((prev) => (prev ? { ...prev, content: shownText } : prev));
-      };
+      /**
+       * Al terminar no se vuelca lo que queda de golpe: se deja que acabe de
+       * salir al mismo ritmo, que si no el ultimo trozo aparecia de un tiron
+       * justo al final. Al abortar si, porque ahi el usuario ya ha dicho basta.
+       */
+      const settleText = (abortado: boolean) =>
+        new Promise<void>((resolve) => {
+          if (abortado || !textQueue) {
+            if (frame !== null) cancelAnimationFrame(frame);
+            frame = null;
+            if (textQueue) {
+              shownText += textQueue;
+              textQueue = '';
+              setPending((prev) => (prev ? { ...prev, content: shownText } : prev));
+            }
+            resolve();
+            return;
+          }
+
+          // Tope de seguridad: pase lo que pase, el mensaje final no se hace
+          // esperar mas de un segundo.
+          const limite = setTimeout(() => {
+            clearInterval(vigilante);
+            if (frame !== null) cancelAnimationFrame(frame);
+            frame = null;
+            textQueue = '';
+            resolve();
+          }, 1000);
+
+          const vigilante = setInterval(() => {
+            if (textQueue) return;
+            clearInterval(vigilante);
+            clearTimeout(limite);
+            resolve();
+          }, 30);
+        });
 
       try {
         // Al editar, esto es el borrado en el servidor de lo que venia
@@ -548,11 +602,12 @@ export function App({ user }: { user: { id: string; email: string } }) {
         }
       } catch (err) {
         // Abortar es una accion del usuario, no un fallo que reportar.
-        if ((err as Error).name !== 'AbortError') {
+        abortado = (err as Error).name === 'AbortError';
+        if (!abortado) {
           setError('Se ha perdido la conexion. Lo que se habia generado esta guardado.');
         }
       } finally {
-        flushText();
+        await settleText(abortado);
         clearTimeout(slowTimer);
         setSlow(false);
         setToolRunning(null);
@@ -805,17 +860,58 @@ export function App({ user }: { user: { id: string; email: string } }) {
               </button>
 
               {(projectConversations.get(p.id) ?? []).slice(0, 6).map((c) => (
-                <button
-                  key={c.id}
-                  className={`side-sub${c.id === activeId && !openProjectId ? ' on' : ''}`}
-                  onClick={() => {
-                    setOpenProjectId(null);
-                    void openConversation(c.id);
-                  }}
-                  title={c.title}
-                >
-                  {c.title}
-                </button>
+                <div key={c.id} style={{ position: 'relative' }}>
+                  <button
+                    className={`side-sub${c.id === activeId && !openProjectId ? ' on' : ''}`}
+                    onClick={() => {
+                      setOpenProjectId(null);
+                      void openConversation(c.id);
+                    }}
+                    title={c.title}
+                  >
+                    <span className="conv-title">{c.title}</span>
+                    <span
+                      className="conv-menu"
+                      role="button"
+                      tabIndex={0}
+                      aria-label="Mas opciones"
+                      aria-expanded={menuFor === c.id}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setMenuFor(menuFor === c.id ? null : c.id);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setMenuFor(menuFor === c.id ? null : c.id);
+                        }
+                      }}
+                    >
+                      <Dots />
+                    </span>
+                  </button>
+
+                  {menuFor === c.id && (
+                    <div className="pop" style={{ right: 8, top: 28 }}>
+                      <button
+                        className="pop-item"
+                        onClick={() => void renameConversation(c.id, c.title)}
+                      >
+                        <Pencil /> Renombrar
+                      </button>
+                      <button className="pop-item" onClick={() => void detachConversation(c.id)}>
+                        <Folder /> Sacar del proyecto
+                      </button>
+                      <button
+                        className="pop-item danger"
+                        onClick={() => void removeConversation(c.id)}
+                      >
+                        <Trash /> Borrar
+                      </button>
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
           ))}

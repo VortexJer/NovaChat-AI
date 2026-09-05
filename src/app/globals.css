@@ -2267,9 +2267,11 @@ button {
 
 /* Las conversaciones de un proyecto, colgando de el en la barra lateral. */
 .side-sub {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
-  padding: 5px 8px 5px 30px;
+  padding: 5px 4px 5px 30px;
   border: 0;
   border-radius: 7px;
   background: none;
@@ -2286,6 +2288,17 @@ button {
 .side-sub:hover {
   background: var(--surface);
   color: var(--text-2);
+}
+
+/* El "..." solo aparece al pasar por encima o con el menu abierto, como en la
+   lista de abajo: si no, la barra se llena de puntos. */
+.side-sub .conv-menu {
+  opacity: 0;
+}
+
+.side-sub:hover .conv-menu,
+.side-sub .conv-menu[aria-expanded='true'] {
+  opacity: 1;
 }
 
 .side-sub.on {
