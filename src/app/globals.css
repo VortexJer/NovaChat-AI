@@ -2345,3 +2345,28 @@ button {
   line-height: 1.45;
   color: var(--text-3);
 }
+
+/* El "..." del proyecto en la barra: igual que el de las conversaciones, que es
+   donde se busca. Antes solo estaba dentro del proyecto, pequeño y pegado al
+   titulo, y no habia manera de dar con el. */
+.side-nav-item .conv-menu {
+  opacity: 0;
+}
+
+.side-nav-item:hover .conv-menu,
+.side-nav-item .conv-menu[aria-expanded='true'] {
+  opacity: 1;
+}
+
+.side-nav-item .conv-menu:hover {
+  background: var(--surface-2, rgba(255, 255, 255, 0.06));
+  border-radius: 6px;
+  color: var(--text);
+}
+
+/* Y dentro del proyecto, sus opciones se van al extremo derecho de la
+   cabecera, como en claude.ai, en vez de quedar pegadas al nombre. */
+.project-title {
+  justify-content: space-between;
+  width: 100%;
+}

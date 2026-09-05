@@ -62,6 +62,8 @@ export function App({ user }: { user: { id: string; email: string } }) {
   };
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [openProjectId, setOpenProjectId] = useState<string | null>(null);
+  /** El proyecto cuyo "borrar" esta esperando el segundo clic. */
+  const [confirmProject, setConfirmProject] = useState<string | null>(null);
   const [tasksOpen, setTasksOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
@@ -288,6 +290,36 @@ export function App({ user }: { user: { id: string; email: string } }) {
       body: JSON.stringify({ projectId: null }),
     });
     void loadProjects();
+  }
+
+  async function renameProject(id: string, actual: string) {
+    setMenuFor(null);
+    const name = prompt('Nuevo nombre del proyecto', actual);
+    if (!name?.trim() || name.trim() === actual) return;
+    await fetch(`/api/projects/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim() }),
+    });
+    void loadProjects();
+  }
+
+  /**
+   * Borrar un proyecto no borra sus conversaciones: el servidor las saca de el
+   * y siguen en el historial, asi que aqui hay que devolverlas a la lista por
+   * fechas sin recargar.
+   */
+  async function removeProject(id: string) {
+    setMenuFor(null);
+    setConfirmProject(null);
+    const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+    if (!res.ok) return;
+
+    if (openProjectId === id) setOpenProjectId(null);
+    setProjects((prev) => prev.filter((p) => p.id !== id));
+    setConversations((prev) =>
+      prev.map((c) => (c.project_id === id ? { ...c, project_id: null } : c)),
+    );
   }
 
   async function removeConversation(id: string) {
@@ -767,6 +799,10 @@ export function App({ user }: { user: { id: string; email: string } }) {
     return () => window.removeEventListener('click', close);
   }, [menuFor, userMenu]);
 
+  useEffect(() => {
+    if (!menuFor) setConfirmProject(null);
+  }, [menuFor]);
+
   // Una conversacion de un proyecto vive **dentro** del proyecto, como en
   // claude.ai: cuelga de el en la barra lateral y no aparece tambien suelta
   // en la lista por fechas. Verlo en los dos sitios era lo que hacia que el
@@ -848,7 +884,7 @@ export function App({ user }: { user: { id: string; email: string } }) {
           </div>
           {projects.length === 0 && <p className="side-empty">Aun no hay ninguno.</p>}
           {projects.map((p) => (
-            <div key={p.id}>
+            <div key={p.id} style={{ position: 'relative' }}>
               <button
                 className={`side-nav-item${openProjectId === p.id ? ' on' : ''}`}
                 onClick={() => {
@@ -856,8 +892,61 @@ export function App({ user }: { user: { id: string; email: string } }) {
                   setSidebarOpen(false);
                 }}
               >
-                <Folder size={14} /> {p.name}
+                <Folder size={14} />
+                <span className="conv-title">{p.name}</span>
+                <span
+                  className="conv-menu"
+                  role="button"
+                  tabIndex={0}
+                  aria-label="Opciones del proyecto"
+                  aria-expanded={menuFor === `proyecto-${p.id}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMenuFor(menuFor === `proyecto-${p.id}` ? null : `proyecto-${p.id}`);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setMenuFor(menuFor === `proyecto-${p.id}` ? null : `proyecto-${p.id}`);
+                    }
+                  }}
+                >
+                  <Dots />
+                </span>
               </button>
+
+              {menuFor === `proyecto-${p.id}` && (
+                <div
+                  className="pop"
+                  style={{ right: 8, top: 32 }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button className="pop-item" onClick={() => void renameProject(p.id, p.name)}>
+                    <Pencil /> Renombrar
+                  </button>
+
+                  {confirmProject === p.id ? (
+                    <>
+                      <p className="pop-note">
+                        {p.conversations
+                          ? `Sus ${p.conversations} conversaciones no se borran: vuelven a la lista general.`
+                          : 'No tiene conversaciones.'}
+                      </p>
+                      <button className="pop-item danger" onClick={() => void removeProject(p.id)}>
+                        <Trash /> Si, borrar
+                      </button>
+                      <button className="pop-item" onClick={() => setConfirmProject(null)}>
+                        Cancelar
+                      </button>
+                    </>
+                  ) : (
+                    <button className="pop-item danger" onClick={() => setConfirmProject(p.id)}>
+                      <Trash /> Borrar proyecto
+                    </button>
+                  )}
+                </div>
+              )}
 
               {(projectConversations.get(p.id) ?? []).slice(0, 6).map((c) => (
                 <div key={c.id} style={{ position: 'relative' }}>
