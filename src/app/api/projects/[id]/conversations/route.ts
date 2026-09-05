@@ -14,7 +14,7 @@ export async function GET(_req: Request, { params }: Params) {
 
   const { id } = await params;
   const conversations = await sql`
-    SELECT id, title FROM conversations
+    SELECT id, title, updated_at FROM conversations
     WHERE project_id = ${id} AND user_id = ${user.id}
     ORDER BY created_at DESC
     LIMIT 50

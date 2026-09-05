@@ -13,7 +13,7 @@ export async function GET() {
   await ready();
 
   const conversations = await sql`
-    SELECT id, title, model, pinned, updated_at, reasoning_effort
+    SELECT id, title, model, pinned, updated_at, reasoning_effort, project_id
     FROM conversations
     WHERE user_id = ${user.id}
     ORDER BY pinned DESC, updated_at DESC
@@ -63,5 +63,6 @@ export async function POST(req: Request) {
     title: 'Nueva conversacion',
     pinned: false,
     reasoning_effort: effort,
+    project_id: project,
   });
 }

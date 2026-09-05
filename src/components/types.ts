@@ -10,6 +10,8 @@ export type Conversation = {
   pinned: boolean;
   updated_at: string;
   reasoning_effort?: ReasoningEffort;
+  /** El proyecto al que pertenece, si nacio dentro de uno. */
+  project_id?: string | null;
 };
 
 /**

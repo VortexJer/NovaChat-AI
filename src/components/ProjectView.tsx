@@ -15,7 +15,16 @@ type Project = {
 };
 
 type Doc = { id: string; name: string; content: string };
-type Conv = { id: string; title: string };
+type Conv = { id: string; title: string; updated_at: string };
+
+/** "Ahora", "hace 20 min", "hace 3 h", o la fecha si ya es de otro dia. */
+function cuando(iso: string): string {
+  const min = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (min < 1) return 'Ahora';
+  if (min < 60) return `hace ${min} min`;
+  if (min < 60 * 24) return `hace ${Math.round(min / 60)} h`;
+  return new Date(iso).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+}
 
 /**
  * Un proyecto: el sitio desde el que se chatea sobre un tema.
@@ -122,11 +131,12 @@ export function ProjectView({
         {convs.length > 0 && (
           <div className="project-convs">
             <div className="model-group" style={{ paddingLeft: 0 }}>
-              Conversaciones del proyecto
+              Recientes
             </div>
             {convs.map((c) => (
               <div className="result" key={c.id} onClick={() => onOpenConversation(c.id)}>
                 <b>{c.title}</b>
+                <small>{cuando(c.updated_at)}</small>
               </div>
             ))}
           </div>

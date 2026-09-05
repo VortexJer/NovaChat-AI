@@ -712,7 +712,28 @@ export function App({ user }: { user: { id: string; email: string } }) {
     return () => window.removeEventListener('click', close);
   }, [menuFor, userMenu]);
 
-  const groups = useMemo(() => groupByDate(conversations), [conversations]);
+  // Una conversacion de un proyecto vive **dentro** del proyecto, como en
+  // claude.ai: cuelga de el en la barra lateral y no aparece tambien suelta
+  // en la lista por fechas. Verlo en los dos sitios era lo que hacia que el
+  // proyecto pareciera una etiqueta y no un sitio.
+  const groups = useMemo(
+    () => groupByDate(conversations.filter((c) => !c.project_id)),
+    [conversations],
+  );
+
+  const projectConversations = useMemo(() => {
+    const map = new Map<string, Conversation[]>();
+    for (const c of conversations) {
+      if (!c.project_id) continue;
+      const list = map.get(c.project_id);
+      if (list) list.push(c);
+      else map.set(c.project_id, [c]);
+    }
+    return map;
+  }, [conversations]);
+
+  /** El proyecto de la conversacion abierta, para la miga de pan de arriba. */
+  const activeProject = projects.find((p) => p.id === active?.project_id) ?? null;
 
   // El pie del redactor recuerda verificar las fuentes solo cuando la ultima
   // respuesta de verdad busco algo, no siempre.
@@ -772,16 +793,31 @@ export function App({ user }: { user: { id: string; email: string } }) {
           </div>
           {projects.length === 0 && <p className="side-empty">Aun no hay ninguno.</p>}
           {projects.map((p) => (
-            <button
-              key={p.id}
-              className={`side-nav-item${openProjectId === p.id ? ' on' : ''}`}
-              onClick={() => {
-                setOpenProjectId(p.id);
-                setSidebarOpen(false);
-              }}
-            >
-              <Folder size={14} /> {p.name}
-            </button>
+            <div key={p.id}>
+              <button
+                className={`side-nav-item${openProjectId === p.id ? ' on' : ''}`}
+                onClick={() => {
+                  setOpenProjectId(p.id);
+                  setSidebarOpen(false);
+                }}
+              >
+                <Folder size={14} /> {p.name}
+              </button>
+
+              {(projectConversations.get(p.id) ?? []).slice(0, 6).map((c) => (
+                <button
+                  key={c.id}
+                  className={`side-sub${c.id === activeId && !openProjectId ? ' on' : ''}`}
+                  onClick={() => {
+                    setOpenProjectId(null);
+                    void openConversation(c.id);
+                  }}
+                  title={c.title}
+                >
+                  {c.title}
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
 
@@ -956,6 +992,18 @@ export function App({ user }: { user: { id: string; email: string } }) {
 
           <h1>
             {incognito && <span className="tag">Incognito</span>}
+            {!openProject && activeProject && (
+              <>
+                <button
+                  className="crumb"
+                  onClick={() => setOpenProjectId(activeProject.id)}
+                  title="Volver al proyecto"
+                >
+                  {activeProject.name}
+                </button>
+                <span className="crumb-sep">/</span>
+              </>
+            )}
             {openProject?.name ?? active?.title ?? 'Nueva conversacion'}
           </h1>
 
