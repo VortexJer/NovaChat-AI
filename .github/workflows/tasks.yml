@@ -1,0 +1,50 @@
+name: Tareas programadas
+
+# Despierta a las tareas que ya tocaban.
+#
+# El disparador tiene que venir de fuera: la instancia gratuita de Render se
+# suspende sin trafico, asi que un temporizador dentro de la aplicacion
+# dejaria de existir justo cuando hace falta. Cada cuarto de hora se le
+# pregunta a la app si hay algo pendiente; ella decide que corre y que no.
+#
+# La cabecera lleva un secreto compartido (TASKS_SECRET) porque este endpoint
+# no tiene sesion de navegador detras y no puede quedar abierto.
+
+on:
+  schedule:
+    - cron: '5,20,35,50 * * * *'
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/tasks.yml'
+
+concurrency:
+  group: tareas
+  cancel-in-progress: true
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Ejecutar las tareas pendientes
+        run: |
+          if [ -z "${{ secrets.TASKS_SECRET }}" ]; then
+            echo "Falta el secreto TASKS_SECRET en el repositorio; no hay nada que hacer."
+            exit 0
+          fi
+          # --max-time largo a proposito: la peticion puede tener que esperar a
+          # que la instancia arranque en frio y ademas a que el modelo conteste.
+          code=$(curl -sS -o /tmp/salida.json -w '%{http_code}' --max-time 540 \
+            -X POST \
+            -H "x-tasks-secret: ${{ secrets.TASKS_SECRET }}" \
+            https://lobechat-yxbn.onrender.com/api/tasks/run)
+          echo "HTTP $code"
+          cat /tmp/salida.json || true
+          echo
+          # 503 significa que la app aun no tiene el secreto configurado: es un
+          # aviso, no un fallo del que haya que enterarse cada quince minutos.
+          if [ "$code" = "000" ] || [ "$code" = "401" ]; then
+            echo "El disparador no ha podido ejecutar las tareas."
+            exit 1
+          fi

@@ -1,0 +1,48 @@
+name: Keepalive
+
+# Mantiene despierta la instancia gratuita de Render.
+#
+# En el plan gratuito el servicio se suspende tras unos 15 minutos sin
+# trafico, y la siguiente visita paga un arranque en frio de casi un minuto.
+# Un ping cada diez minutos lo evita sin coste.
+#
+# El cron de GitHub no es puntual — puede retrasarse en horas de mucha carga —
+# por eso el intervalo es de diez minutos y no de catorce: aunque una
+# ejecucion llegue tarde, la siguiente entra dentro de la ventana.
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+  # Al tocar este archivo se ejecuta en el acto: sirve para comprobar que el
+  # ping funciona sin esperar a que caiga la primera ejecucion programada.
+  push:
+    paths:
+      - '.github/workflows/keepalive.yml'
+
+# Si una ejecucion se retrasa y se solapa con la siguiente, sobra: basta con
+# el ping mas reciente.
+concurrency:
+  group: keepalive
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Despertar la aplicacion
+        run: |
+          # --max-time generoso a proposito: si la instancia estaba dormida,
+          # esta peticion es justo la que paga el arranque en frio, y cortarla
+          # antes de tiempo dejaria el servicio dormido igualmente.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 180 \
+            -H 'User-Agent: novachat-keepalive' \
+            https://lobechat-yxbn.onrender.com/api/health)
+          echo "HTTP $code"
+          # Cualquier respuesta del servidor vale: significa que esta en pie.
+          # Solo se falla si no contesta nada (curl devuelve 000).
+          if [ "$code" = "000" ]; then
+            echo "Sin respuesta de la aplicacion"
+            exit 1
+          fi

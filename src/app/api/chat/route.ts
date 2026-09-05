@@ -1,0 +1,668 @@
+import { randomUUID } from 'node:crypto';
+
+import { currentUser } from '@/lib/auth';
+import { ready, sql } from '@/lib/db';
+import { type ChatMessage, complete, streamCompletion, TITLE_MODEL } from '@/lib/llm';
+import { DEFAULT_SYSTEM_PROMPT, renderPrompt, TITLE_PROMPT } from '@/lib/prompt';
+import { projectPromptBlock } from '@/lib/projects';
+import { getSkillContent } from '@/lib/skills';
+import { availableTools, runTool, type ToolSpec, type ToolUI } from '@/lib/tools';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+/** Cuantos mensajes previos se envian. Acota el gasto y la latencia. */
+const HISTORY_LIMIT = 40;
+
+/**
+ * Cuantas rondas de herramientas se permiten por respuesta.
+ *
+ * Sin tope, un modelo que interpreta mal un resultado puede quedarse buscando
+ * en bucle hasta agotar la cuota. Tres rondas bastan para "busca, lee la mejor
+ * fuente, responde".
+ */
+/**
+ * Vueltas de herramienta por respuesta.
+ *
+ * Tres se quedaban cortas: cargar la skill del documento y buscar en la web
+ * las cifras que la propia skill pide citar ya gastan tres, y la vuelta que
+ * habria creado el archivo se quedaba sin herramientas — visto en produccion,
+ * con la presentacion entera volcada como JSON en un bloque de codigo porque
+ * ya no podia llamar a nada.
+ */
+const MAX_TOOL_ROUNDS = 6;
+
+/**
+ * Herramienta de escape del reintento forzado.
+ *
+ * El modelo del router falla de dos formas al pedirle un archivo: unas veces
+ * carga la skill, anuncia que va a generar y termina el turno sin llamar a
+ * nada; otras ni siquiera carga la skill y escribe la presentacion entera en
+ * el chat, diapositiva por diapositiva. La segunda no deja rastro en la traza.
+ *
+ * En vez de adivinar por palabras del mensaje que es lo que se pedia — que
+ * falla con "resume el informe que te pase" y con cualquier frase que no
+ * estuviera en la lista — se le vuelve a preguntar obligandole a elegir una
+ * herramienta, y se le da esta como salida. Decide el modelo, que es quien
+ * entiende la peticion, y no una lista de palabras.
+ */
+const NO_TOOL: ToolSpec = {
+  type: 'function',
+  function: {
+    name: 'sin_herramienta',
+    description:
+      'Usala cuando la respuesta que ya has escrito esta completa tal cual y no hacia falta generar ningun archivo ni buscar nada. Si en cambio lo que te han pedido era un documento, una presentacion o una hoja de calculo, no uses esta: llama a la herramienta que crea ese archivo.',
+    parameters: { type: 'object', properties: {} },
+  },
+};
+
+/** A partir de aqui una respuesta ya no es una contestacion de chat, es el cuerpo de un documento. */
+const LONG_ANSWER = 300;
+
+/** Skills cuya carga significa que el modelo iba a generar un archivo. */
+const DOC_SKILLS = new Set(['docx', 'pptx', 'xlsx']);
+
+/** Un paso de la traza de herramientas de un mensaje. Se persiste tal cual. */
+export type TraceStep = { id: string; name: string; args: Record<string, unknown>; ui?: ToolUI };
+
+type Event =
+  | { t: 'delta'; v: string }
+  | { t: 'reasoning'; v: string }
+  | { t: 'tool'; id: string; name: string; args: Record<string, unknown> }
+  | { t: 'tool_result'; id: string; ui?: ToolUI }
+  | { t: 'title'; v: string }
+  | { t: 'user'; id: string }
+  | { t: 'done'; id: string; reply_to?: string | null; version_index?: number }
+  | { t: 'error'; v: string };
+
+const encode = (e: Event) => new TextEncoder().encode(JSON.stringify(e) + '\n');
+
+type ToolCall = { id: string; name: string; args: string };
+
+export async function POST(req: Request) {
+  const user = await currentUser();
+  if (!user) return new Response('No autenticado', { status: 401 });
+
+  await ready();
+
+  const {
+    conversationId,
+    content: rawContent,
+    model,
+    reasoningEffort,
+    incognito = false,
+    history: clientHistory,
+    mode = 'send',
+    replyTo,
+  } = (await req.json()) as {
+    conversationId: string | null;
+    content?: string;
+    model: string;
+    reasoningEffort?: 'low' | 'medium' | 'high' | null;
+    incognito?: boolean;
+    history?: { role: string; content: string }[];
+    mode?: 'send' | 'retry';
+    replyTo?: string;
+  };
+
+  if (mode === 'send' && (typeof rawContent !== 'string' || !rawContent.trim())) {
+    return new Response('Peticion invalida', { status: 400 });
+  }
+  // Reintentar guarda la respuesta nueva como otra version en vez de repetir
+  // el mensaje del usuario: solo tiene sentido con conversacion persistida,
+  // en incognito el cliente ya lo resuelve truncando su propio array.
+  if (mode === 'retry' && (incognito || typeof replyTo !== 'string' || !replyTo)) {
+    return new Response('Peticion invalida', { status: 400 });
+  }
+  if (!incognito && !conversationId) {
+    return new Response('Peticion invalida', { status: 400 });
+  }
+
+  // En incognito no se toca la base de datos en ningun momento: ni se busca la
+  // conversacion, ni se guarda el mensaje, ni se titula. El historial lo aporta
+  // el cliente, que es el unico sitio donde vive.
+  if (!incognito) {
+    // La pertenencia se comprueba en la consulta, no despues: asi un id ajeno
+    // no llega a leer nada aunque se adivine.
+    const [conv] = await sql<{ id: string }[]>`
+      SELECT id FROM conversations
+      WHERE id = ${conversationId} AND user_id = ${user.id}
+      LIMIT 1
+    `;
+    if (!conv) return new Response('Conversacion no encontrada', { status: 404 });
+  }
+
+  const [settings] = await sql<
+    {
+      system_prompt: string | null;
+      temperature: number;
+      display_name: string | null;
+      about_you: string | null;
+      instructions: string | null;
+    }[]
+  >`
+    SELECT system_prompt, temperature, display_name, about_you, instructions
+    FROM settings WHERE user_id = ${user.id}
+  `;
+
+  type Row = {
+    id: string;
+    role: string;
+    content: string;
+    reply_to: string | null;
+    version_index: number;
+    created_at: Date;
+    trace: { name: string; args?: Record<string, unknown> }[] | null;
+  };
+
+  // Todas las filas, no solo las ultimas N: hace falta el historial completo
+  // para poder quedarse solo con la version mas reciente de cada respuesta y,
+  // en un reintento, cortar justo antes del turno que se esta regenerando.
+  const rows: Row[] = incognito
+    ? []
+    : await sql<Row[]>`
+        SELECT id, role, content, reply_to, version_index, created_at, trace
+        FROM messages
+        WHERE conversation_id = ${conversationId}
+        ORDER BY created_at ASC
+      `;
+
+  let content = rawContent ?? '';
+  let targetUserId: string | null = null;
+
+  if (mode === 'retry') {
+    const target = rows.find((r) => r.id === replyTo && r.role === 'user');
+    if (!target) return new Response('Mensaje no encontrado', { status: 404 });
+    content = target.content;
+    targetUserId = target.id;
+  }
+
+  /**
+   * Reconstruye el historial quedandose solo con la version mas reciente de
+   * cada respuesta (las anteriores siguen en la base de datos, navegables
+   * desde el selector, pero no se le repiten al modelo como si fueran turnos
+   * aparte). `cutBeforeId`, si se da, para antes de ese mensaje: es como
+   * queda el contexto justo antes del turno que se va a reintentar.
+   */
+  function buildHistory(list: Row[], cutBeforeId?: string | null) {
+    const latestByReplyTo = new Map<string, Row>();
+    for (const r of list) {
+      if (r.role === 'assistant' && r.reply_to) {
+        const cur = latestByReplyTo.get(r.reply_to);
+        if (!cur || r.version_index > cur.version_index) latestByReplyTo.set(r.reply_to, r);
+      }
+    }
+    const out: { role: string; content: string }[] = [];
+    for (const r of list) {
+      if (cutBeforeId && r.id === cutBeforeId) break;
+      if (r.role === 'assistant' && r.reply_to) {
+        if (latestByReplyTo.get(r.reply_to)?.id === r.id) out.push({ role: r.role, content: r.content });
+      } else {
+        out.push({ role: r.role, content: r.content });
+      }
+    }
+    return out;
+  }
+
+  const history = incognito
+    ? (clientHistory ?? []).slice(-HISTORY_LIMIT)
+    : buildHistory(rows, targetUserId).slice(-HISTORY_LIMIT);
+
+  const userMessageId = randomUUID();
+  if (!incognito && mode === 'send') {
+    await sql`
+      INSERT INTO messages (id, conversation_id, role, content, reply_to)
+      VALUES (${userMessageId}, ${conversationId}, 'user', ${content}, ${userMessageId})
+    `;
+  }
+
+  // Version que le toca a esta respuesta: 1 para un turno nuevo, o la
+  // siguiente libre si se esta reintentando uno que ya tiene alguna.
+  const replyToId = mode === 'retry' ? targetUserId : userMessageId;
+  const nextVersion =
+    mode === 'retry'
+      ? Math.max(0, ...rows.filter((r) => r.reply_to === targetUserId).map((r) => r.version_index)) + 1
+      : 1;
+
+  // Un prompt guardado pero en blanco es el preset "Sin prompt": se respeta y
+  // no se cae al de fabrica. Solo la ausencia de fila usa el de fabrica.
+  const stored = settings?.system_prompt;
+  const systemPrompt = stored === undefined || stored === null ? DEFAULT_SYSTEM_PROMPT : stored;
+
+  // Perfil y proyecto se añaden detras del prompt, no dentro: el prompt de
+  // sistema puede estar personalizado o vacio, y estas dos cosas tienen que
+  // llegar igual. En incognito no hay conversacion guardada, asi que tampoco
+  // hay proyecto del que sacar contexto.
+  const profile = profileBlock(settings);
+  const project = incognito || !conversationId ? '' : await projectPromptBlock(conversationId);
+  const loaded = await loadedSkillsBlock(user.id, rows);
+  const preamble = [systemPrompt.trim() ? renderPrompt(systemPrompt) : '', profile, project, loaded]
+    .filter(Boolean)
+    .join('\n\n');
+
+  const conversation: ChatMessage[] = [
+    ...(preamble ? [{ role: 'system' as const, content: preamble }] : []),
+    ...history.map((m) => ({ role: m.role as ChatMessage['role'], content: m.content })),
+    { role: 'user' as const, content },
+  ];
+
+  // Las herramientas estan siempre disponibles: no hay interruptor que las
+  // desactive, asi que se ofrecen siempre que existan (documentos sin clave,
+  // busqueda/imagenes si hay clave configurada, historial siempre).
+  const tools = await availableTools(user.id);
+
+  const assistantId = randomUUID();
+  const isFirstExchange = mode === 'send' && history.length === 0;
+  const abort = new AbortController();
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let text = '';
+      let reasoning = '';
+      let closed = false;
+      const trace: TraceStep[] = [];
+
+      const send = (e: Event) => {
+        if (!closed) controller.enqueue(encode(e));
+      };
+
+      // El cliente arranca el turno con un id local; en cuanto se conoce el
+      // real de la base de datos se le manda para que lo adopte, y asi un
+      // reintento posterior pueda referenciarlo por su id de verdad.
+      if (!incognito && mode === 'send') send({ t: 'user', id: userMessageId });
+
+      // Si el usuario cierra la pestana o pulsa "detener", se corta la peticion
+      // al router en vez de seguir gastando tokens contra el vacio. Lo generado
+      // hasta ese punto se guarda igual, mas abajo.
+      req.signal.addEventListener('abort', () => abort.abort());
+
+      try {
+        // Cada vuelta es una respuesta del modelo. Si pide herramientas, se
+        // ejecutan, se anaden al contexto y se vuelve a preguntar; si contesta
+        // texto, se acaba.
+        // Los modelos pequenos del router se quedan a veces a mitad de camino:
+        // cargan la skill del documento, anuncian "voy a generar la
+        // presentacion" y terminan el turno sin llamar a la herramienta. Si
+        // eso pasa se reintenta una vez obligando a que llame a alguna
+        // (`tool_choice: "required"`, que este router si admite — el nombre de
+        // funcion concreto lo rechazan los proveedores). Se reintenta solo una
+        // vez y solo si ya habia cargado una skill de documento: es la senal
+        // de que estaba a punto de generar un archivo, no una conversacion
+        // normal a la que forzarle una herramienta seria absurdo.
+        // Dos como mucho: el primero suele acabar en `usar_skill` y hace falta
+        // otro para que llegue a crear el archivo.
+        let forced = 0;
+        // Compartido por todas las vueltas del turno: una skill se sirve una vez.
+        const servedSkills = new Set<string>();
+
+        for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+          const offerTools = tools.length > 0 && round < MAX_TOOL_ROUNDS;
+
+          const result = await runRound({
+            model,
+            messages: conversation,
+            temperature: settings?.temperature ?? 1,
+            reasoningEffort: reasoningEffort ?? undefined,
+            tools: offerTools ? tools : [],
+            signal: abort.signal,
+            onDelta: (v) => {
+              text += v;
+              send({ t: 'delta', v });
+            },
+            onReasoning: (v) => {
+              reasoning += v;
+              send({ t: 'reasoning', v });
+            },
+          });
+
+          if (result.error) {
+            send({ t: 'error', v: result.error });
+            break;
+          }
+
+          if (result.toolCalls.length === 0) {
+            // Se vuelve a preguntar cuando el modelo ya habia cargado una skill
+            // de documento (iba a generar y se quedo a medias) o cuando ha
+            // soltado una respuesta larga sin usar nada: las dos formas en que
+            // se salta la herramienta. Una contestacion corta de chat no entra
+            // aqui, asi que hablar normal no paga ninguna llamada de mas.
+            const loadedDocSkill = trace.some(
+              (step) => step.name === 'usar_skill' && DOC_SKILLS.has(String(step.args?.nombre ?? '')),
+            );
+            const maybeOwesFile =
+              forced < 2 &&
+              tools.length > 0 &&
+              (loadedDocSkill || result.text.trim().length >= LONG_ANSWER) &&
+              !trace.some((step) => step.name.startsWith('crear_'));
+
+            if (!maybeOwesFile) break;
+
+            forced++;
+            // Lo que ya dijo va al contexto para que el reintento no repita el
+            // preambulo, y se pide otra vuelta con la herramienta obligada.
+            if (result.text.trim()) {
+              conversation.push({ role: 'assistant', content: result.text } as ChatMessage);
+            }
+            const retryRound = await runRound({
+              model,
+              messages: conversation,
+              temperature: settings?.temperature ?? 1,
+              reasoningEffort: reasoningEffort ?? undefined,
+              tools: [...tools, NO_TOOL],
+              forceTool: true,
+              signal: abort.signal,
+              onDelta: (v) => {
+                text += v;
+                send({ t: 'delta', v });
+              },
+              onReasoning: () => {},
+            });
+
+            if (retryRound.error || retryRound.toolCalls.length === 0) break;
+            // El modelo dice que su respuesta ya estaba completa: se le cree.
+            if (retryRound.toolCalls.some((c) => c.name === NO_TOOL.function.name)) break;
+            result.toolCalls = retryRound.toolCalls.filter((c) => c.name !== NO_TOOL.function.name);
+            result.text = retryRound.text;
+          }
+
+          // El turno del asistente que pide las herramientas tiene que quedar
+          // en el contexto: sin el, el proveedor rechaza los mensajes de rol
+          // "tool" que vienen despues por no corresponder a ninguna llamada.
+          conversation.push({
+            role: 'assistant',
+            content: result.text || null,
+            tool_calls: result.toolCalls.map((c) => ({
+              id: c.id,
+              type: 'function',
+              function: { name: c.name, arguments: c.args },
+            })),
+          } as ChatMessage);
+
+          for (const call of result.toolCalls) {
+            let args: Record<string, unknown> = {};
+            try {
+              args = JSON.parse(call.args || '{}');
+            } catch {
+              // Argumentos malformados: se ejecuta con lo que haya, y la
+              // herramienta contestara que falta la consulta.
+            }
+
+            send({ t: 'tool', id: call.id, name: call.name, args });
+
+            const outcome = await runTool(user.id, call.name, args, incognito ? null : conversationId, servedSkills);
+            conversation.push({
+              role: 'tool',
+              tool_call_id: call.id,
+              content: outcome.forModel,
+            } as ChatMessage);
+
+            trace.push({ id: call.id, name: call.name, args, ui: outcome.ui });
+            send({ t: 'tool_result', id: call.id, ui: outcome.ui });
+          }
+        }
+      } catch (err) {
+        const aborted = (err as Error)?.name === 'AbortError';
+        if (!aborted) {
+          send({ t: 'error', v: 'Se ha perdido la conexion con el router.' });
+        }
+      }
+
+      // Se guarda aunque la respuesta se cortara a medias: es preferible un
+      // mensaje incompleto en el historial a perder lo que ya se habia leido.
+      // Un turno que solo llamo a una herramienta sin anadir texto (por
+      // ejemplo, crear un documento sin comentario) tambien cuenta como
+      // contenido que conservar.
+      if (!incognito) {
+        if (text.trim() || reasoning.trim() || trace.length > 0) {
+          // sql.json() etiqueta el parametro como jsonb para que postgres.js lo
+          // mande tal cual; pasar una cadena ya serializada a mano hace que la
+          // librearia la trate como texto plano y Postgres la vuelva a
+          // envolver, guardando un jsonb-de-un-string en vez del array.
+          await sql`
+            INSERT INTO messages (id, conversation_id, role, content, reasoning, model, trace, reply_to, version_index)
+            VALUES (${assistantId}, ${conversationId}, 'assistant', ${text},
+                    ${reasoning || null}, ${model},
+                    ${trace.length ? sql.json(trace as unknown as Parameters<typeof sql.json>[0]) : null},
+                    ${replyToId}, ${nextVersion})
+          `;
+        }
+        await sql`UPDATE conversations SET updated_at = now() WHERE id = ${conversationId}`;
+      }
+
+      if (!incognito && isFirstExchange) {
+        const title = await makeTitle(content);
+        if (title) {
+          await sql`UPDATE conversations SET title = ${title} WHERE id = ${conversationId}`;
+          send({ t: 'title', v: title });
+        }
+      }
+
+      send({ t: 'done', id: assistantId, reply_to: incognito ? null : replyToId, version_index: incognito ? undefined : nextVersion });
+      closed = true;
+      controller.close();
+    },
+
+    cancel() {
+      abort.abort();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'application/x-ndjson; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      // Sin esto algunos proxies acumulan la respuesta y el streaming se ve
+      // como un unico bloque al final.
+      'X-Accel-Buffering': 'no',
+    },
+  });
+}
+
+/**
+ * Una vuelta de conversacion con el modelo.
+ *
+ * Devuelve el texto emitido y las llamadas a herramientas que haya pedido. Los
+ * fragmentos se van entregando por los callbacks segun llegan, para que el
+ * usuario vea escribir en vez de esperar al final.
+ */
+async function runRound(opts: {
+  model: string;
+  messages: ChatMessage[];
+  temperature: number;
+  reasoningEffort?: 'low' | 'medium' | 'high';
+  tools: unknown[];
+  signal: AbortSignal;
+  /** Obliga al modelo a llamar a alguna herramienta en vez de solo contestar texto. */
+  forceTool?: boolean;
+  onDelta: (v: string) => void;
+  onReasoning: (v: string) => void;
+}): Promise<{ text: string; toolCalls: ToolCall[]; error?: string }> {
+  let upstream = await streamCompletion(
+    {
+      model: opts.model,
+      messages: opts.messages,
+      temperature: opts.temperature,
+      reasoning_effort: opts.reasoningEffort,
+      ...(opts.tools.length > 0
+        ? { tools: opts.tools, tool_choice: opts.forceTool ? 'required' : 'auto' }
+        : {}),
+    },
+    opts.signal,
+  );
+
+  // No todos los modelos del router admiten herramientas, y el que no las
+  // admite responde 400 en lugar de ignorarlas. En ese caso se reintenta sin
+  // ellas: es preferible una respuesta sin busqueda a un error.
+  if (!upstream.ok && opts.tools.length > 0 && upstream.status >= 400 && upstream.status < 500) {
+    upstream = await streamCompletion(
+      {
+        model: opts.model,
+        messages: opts.messages,
+        temperature: opts.temperature,
+        reasoning_effort: opts.reasoningEffort,
+      },
+      opts.signal,
+    );
+  }
+
+  if (!upstream.ok || !upstream.body) {
+    const detail = await upstream.text().catch(() => '');
+    return { text: '', toolCalls: [], error: describeUpstreamError(upstream.status, detail, opts.model) };
+  }
+
+  const reader = upstream.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let text = '';
+
+  // Las llamadas llegan troceadas igual que el texto: el nombre en un
+  // fragmento y los argumentos repartidos en varios. Se acumulan por indice.
+  const calls = new Map<number, ToolCall>();
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+
+    // El SSE separa eventos por linea; un chunk puede partir uno por la mitad,
+    // asi que la ultima linea incompleta se deja en el buffer.
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) continue;
+
+      const data = trimmed.slice(5).trim();
+      if (data === '[DONE]') continue;
+
+      try {
+        const delta = JSON.parse(data)?.choices?.[0]?.delta;
+        if (!delta) continue;
+
+        // Los modelos de razonamiento mandan la cadena de pensamiento en un
+        // campo aparte, y no hay un nombre unico entre proveedores.
+        const think = delta.reasoning_content ?? delta.reasoning;
+        if (typeof think === 'string' && think) opts.onReasoning(think);
+
+        if (typeof delta.content === 'string' && delta.content) {
+          text += delta.content;
+          opts.onDelta(delta.content);
+        }
+
+        for (const tc of delta.tool_calls ?? []) {
+          const index = tc.index ?? 0;
+          const current = calls.get(index) ?? { id: '', name: '', args: '' };
+          if (tc.id) current.id = tc.id;
+          if (tc.function?.name) current.name = tc.function.name;
+          if (tc.function?.arguments) current.args += tc.function.arguments;
+          calls.set(index, current);
+        }
+      } catch {
+        // Una linea suelta malformada no debe tumbar la respuesta entera.
+      }
+    }
+  }
+
+  const toolCalls = [...calls.values()].filter((c) => c.name);
+  // Algunos proveedores no rellenan el id. El protocolo exige uno para casar
+  // la respuesta con la llamada, asi que se inventa si falta.
+  for (const call of toolCalls) call.id ||= `call_${randomUUID().slice(0, 8)}`;
+
+  return { text, toolCalls };
+}
+
+function describeUpstreamError(status: number, detail: string, model: string) {
+  if (status === 401 || status === 403) {
+    return 'El router ha rechazado la clave. Revisa LLM_API_KEY.';
+  }
+  if (status === 404) {
+    return `El modelo "${model}" ya no esta disponible en el router. Prueba con otro.`;
+  }
+  if (status === 429) {
+    return 'El proveedor de este modelo ha agotado su cuota. Prueba con otro modelo o espera un poco.';
+  }
+  const snippet = detail.slice(0, 200).replace(/\s+/g, ' ').trim();
+  return `El router ha devuelto un error ${status}${snippet ? `: ${snippet}` : '.'}`;
+}
+
+async function makeTitle(firstMessage: string) {
+  const raw = await complete(TITLE_MODEL, [
+    { role: 'system', content: TITLE_PROMPT },
+    { role: 'user', content: firstMessage.slice(0, 2000) },
+  ]);
+  if (!raw) return null;
+
+  // Los modelos pequenos ignoran a veces "sin comillas" y "sin punto final".
+  const clean = raw.split('\n')[0].replace(/^["'`]|["'`.]$/g, '').trim();
+  return clean.length > 0 && clean.length <= 80 ? clean : null;
+}
+
+/**
+ * Lo que la persona ha dicho de si misma en Personalizar.
+ *
+ * Va aparte del prompt de sistema a proposito: quien cambia el prompt para
+ * probar algo no deberia perder por eso su nombre ni sus preferencias.
+ */
+function profileBlock(settings?: {
+  display_name: string | null;
+  about_you: string | null;
+  instructions: string | null;
+}): string {
+  if (!settings) return '';
+  const lines: string[] = [];
+  if (settings.display_name) lines.push(`La persona se llama ${settings.display_name}; llamala asi.`);
+  if (settings.about_you) lines.push(`A que se dedica: ${settings.about_you}`);
+  if (settings.instructions) lines.push(`Como quiere que le respondas:\n${settings.instructions}`);
+  if (!lines.length) return '';
+
+  return `<persona>\n${lines.join('\n\n')}\n</persona>`;
+}
+
+/** Tope de skills que se reinyectan, para que una conversacion larga no se lleve el contexto entero. */
+const MAX_LOADED_SKILLS = 3;
+
+/**
+ * Las skills que ya se leyeron antes en esta conversacion, puestas de una vez.
+ *
+ * Los resultados de herramienta no se guardan en el historial — solo quedan en
+ * la traza de cada mensaje — asi que el modelo no tiene forma de saber que ya
+ * leyo una skill, y la volvia a cargar en **cada mensaje**: una vuelta extra
+ * al router y el texto entero otra vez en el contexto, que es lo que lo hacia
+ * crecer sin parar.
+ *
+ * Aqui se miran las trazas anteriores, se recuperan esas skills y se ponen una
+ * sola vez en el preambulo. Asi el modelo ya las tiene y no necesita pedirlas:
+ * una copia por conversacion en vez de una por mensaje.
+ */
+async function loadedSkillsBlock(
+  userId: string,
+  rows: { trace: { name: string; args?: Record<string, unknown> }[] | null }[],
+): Promise<string> {
+  const names: string[] = [];
+  for (const row of rows) {
+    for (const step of row.trace ?? []) {
+      if (step.name !== 'usar_skill') continue;
+      const n = String(step.args?.nombre ?? '').trim();
+      if (n && !names.includes(n)) names.push(n);
+    }
+  }
+  if (!names.length) return '';
+
+  // Las mas recientes son las que importan si hay muchas.
+  const pick = names.slice(-MAX_LOADED_SKILLS);
+  const parts: string[] = [];
+  for (const name of pick) {
+    const content = await getSkillContent(userId, name);
+    if (content) parts.push(`<skill nombre="${name}">\n${content}\n</skill>`);
+  }
+  if (!parts.length) return '';
+
+  return `<skills_cargadas>
+Ya has leido estas skills en esta conversacion y las tienes aqui enteras. No vuelvas a pedirlas con usar_skill: aplicalas directamente.
+
+${parts.join('\n\n')}
+</skills_cargadas>`;
+}
