@@ -52,10 +52,11 @@ Cada push a `main` que toque código compila la imagen y la publica en el GHCR
 privado del repositorio (`.github/workflows/app-image.yml`). Render tira de la
 etiqueta `:latest`; el despliegue se lanza a mano desde su panel.
 
-Dos workflows más se encargan de lo que la instancia gratuita no puede hacer
-sola: `keepalive.yml` la mantiene despierta y `tasks.yml` dispara las tareas
-programadas (necesita el secreto `TASKS_SECRET`, tanto en el repositorio como
-en Render).
+Lo que la instancia gratuita no puede hacer sola —despertarse y disparar las
+tareas programadas— vive en `keepalive/`: una funcion programada de Netlify.
+Empezo siendo un cron de GitHub Actions y se cambio porque **nunca llego a
+ejecutarse**; el porque, y por que la ventana es de doce horas y no de
+veinticuatro, estan en `keepalive/README.md`.
 
 ## Procedencia
 

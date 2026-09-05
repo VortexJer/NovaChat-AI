@@ -1,0 +1,8 @@
+# Sitio de Netlify sin sitio: no publica ninguna pagina, solo aloja la funcion
+# programada que despierta a Render. Por eso no hay comando de compilacion y la
+# carpeta publicada esta vacia.
+
+[build]
+  command = ""
+  publish = "public"
+  functions = "netlify/functions"

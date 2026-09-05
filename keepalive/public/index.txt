@@ -1,0 +1,2 @@
+Este sitio no publica nada: solo aloja la funcion programada que mantiene
+despierto a Render. Ver netlify/functions/despertar.mjs
