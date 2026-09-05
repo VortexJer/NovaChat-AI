@@ -1121,6 +1121,16 @@ export function App({ user }: { user: { id: string; email: string } }) {
               void send(text, { conversationId: id });
             }}
             onChanged={() => void loadProjects()}
+            onDeleted={(id) => {
+              setOpenProjectId(null);
+              void loadProjects();
+              // Sus conversaciones vuelven a la lista general, que es lo que
+              // hace el servidor: si no, seguirian colgando de un proyecto que
+              // ya no esta.
+              setConversations((prev) =>
+                prev.map((c) => (c.project_id === id ? { ...c, project_id: null } : c)),
+              );
+            }}
           />
         ) : (
           <>

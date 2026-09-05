@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { Composer } from './Composer';
-import { Trash } from './icons';
+import { Dots, Pencil, Trash } from './icons';
 
 type Project = {
   id: string;
@@ -40,6 +40,7 @@ export function ProjectView({
   onOpenConversation,
   onStart,
   onChanged,
+  onDeleted,
   skills,
 }: {
   project: Project;
@@ -47,6 +48,8 @@ export function ProjectView({
   /** Arranca una conversacion del proyecto con este primer mensaje. */
   onStart: (projectId: string, text: string) => void | Promise<void>;
   onChanged: () => void;
+  /** El proyecto ya no existe: quien nos pinta tiene que dejar de hacerlo. */
+  onDeleted: (id: string) => void;
   skills: { name: string; description: string }[];
 }) {
   const [docs, setDocs] = useState<Doc[]>([]);
@@ -58,6 +61,7 @@ export function ProjectView({
   const [noteBody, setNoteBody] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [menu, setMenu] = useState(false);
 
   const load = useCallback(async () => {
     const [d, c] = await Promise.all([
@@ -71,8 +75,50 @@ export function ProjectView({
   useEffect(() => {
     setInstructions(project.instructions ?? '');
     setEditingInstructions(false);
+    setMenu(false);
     void load();
   }, [project.id, project.instructions, load]);
+
+  useEffect(() => {
+    if (!menu) return;
+    const cerrar = () => setMenu(false);
+    window.addEventListener('click', cerrar);
+    return () => window.removeEventListener('click', cerrar);
+  }, [menu]);
+
+  /**
+   * Borrar el proyecto no se lleva por delante sus conversaciones: el servidor
+   * las saca del proyecto y siguen en el historial. Aun asi se pregunta, que es
+   * lo unico irreversible de esta pantalla.
+   */
+  async function borrar() {
+    setMenu(false);
+    const cuantas = convs.length;
+    const aviso = cuantas
+      ? `Borrar el proyecto "${project.name}"? Sus ${cuantas} conversaciones no se borran: vuelven a la lista general.`
+      : `Borrar el proyecto "${project.name}"?`;
+    if (!confirm(aviso)) return;
+
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/projects/${project.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        setError('No se ha podido borrar el proyecto.');
+        return;
+      }
+      onChanged();
+      onDeleted(project.id);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function renombrar() {
+    setMenu(false);
+    const name = prompt('Nuevo nombre del proyecto', project.name);
+    if (!name?.trim() || name.trim() === project.name) return;
+    await patch({ name: name.trim() });
+  }
 
   async function patch(body: Record<string, unknown>) {
     setBusy(true);
@@ -111,7 +157,34 @@ export function ProjectView({
     <div className="project-view">
       <div className="project-main">
         <div className="project-head">
-          <h1>{project.name}</h1>
+          <div className="project-title">
+            <h1>{project.name}</h1>
+            <div style={{ position: 'relative' }}>
+              <button
+                className="icon-btn"
+                aria-label="Opciones del proyecto"
+                aria-expanded={menu}
+                disabled={busy}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMenu((v) => !v);
+                }}
+              >
+                <Dots />
+              </button>
+
+              {menu && (
+                <div className="pop" style={{ right: 0, top: 32 }}>
+                  <button className="pop-item" onClick={() => void renombrar()}>
+                    <Pencil /> Renombrar
+                  </button>
+                  <button className="pop-item danger" onClick={() => void borrar()}>
+                    <Trash /> Borrar proyecto
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
           {project.description && <p>{project.description}</p>}
         </div>
 
