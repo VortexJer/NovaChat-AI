@@ -517,13 +517,13 @@ type RoundOpts = {
  * minutos terminando en nada. Pasado este plazo se pasa al siguiente modelo de
  * SUPLENTES, que o contesta enseguida o devuelve su 429 al instante.
  *
- * Treinta segundos deja pasar holgadamente el caso lento de verdad y corta el
+ * Noventa segundos dejan pasar holgadamente el caso lento de verdad y cortan el
  * caso muerto mucho antes de que se note como "esto no va".
  */
-const SIN_PRIMERA_PALABRA_MS = 30_000;
+const SIN_PRIMERA_PALABRA_MS = 90_000;
 
 /** Lo que se espera al primer modelo cuando ya no queda ningun suplente libre. */
-const ULTIMA_ESPERA_MS = 90_000;
+const ULTIMA_ESPERA_MS = 270_000;
 
 /**
  * Una vuelta de conversacion, reintentando si el modelo se queda mudo.
@@ -552,10 +552,10 @@ const ULTIMA_ESPERA_MS = 90_000;
 /**
  * Cuanto se le da a cada suplente para arrancar.
  *
- * Menos que al modelo elegido: cuando quedan ciento cincuenta candidatos
+ * Menos que al modelo elegido: cuando quedan doscientos y pico candidatos
  * detras, insistir con uno lento sale mas caro que probar el siguiente.
  */
-const PACIENCIA_SUPLENTE_MS = 15_000;
+const PACIENCIA_SUPLENTE_MS = 45_000;
 
 /**
  * Tope de reloj para todo el recorrido de suplentes.
@@ -563,9 +563,9 @@ const PACIENCIA_SUPLENTE_MS = 15_000;
  * Los capados contestan 429 en tres decimas y los alias 404 igual de rapido,
  * asi que recorrer decenas de modelos no gasta presupuesto: solo lo gastan los
  * que se quedan colgados. Con esto, el peor caso del turno queda por debajo de
- * los 180 s del tope general (30 del primero + 45 aqui + 90 de la ultima bala).
+ * los 540 s del tope general (90 del primero + 135 aqui + 270 de la ultima bala).
  */
-const PRESUPUESTO_SUPLENTES_MS = 45_000;
+const PRESUPUESTO_SUPLENTES_MS = 135_000;
 
 /**
  * Una vuelta de conversacion, cambiando de modelo si el que toca no responde.
@@ -659,7 +659,7 @@ async function unIntento(
   // Tope duro, que antes lo ponia `streamCompletion` con su propio timeout y
   // ahora se le pasa nuestra señal: una respuesta que empieza y no termina
   // nunca tambien tiene que cortarse.
-  const tope = setTimeout(() => vigilante.abort(), 180_000);
+  const tope = setTimeout(() => vigilante.abort(), 540_000);
 
   try {
     return await unIntentoInterno(opts, vigilante.signal, () => {

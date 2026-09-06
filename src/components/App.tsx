@@ -529,8 +529,15 @@ export function App({ user }: { user: { id: string; email: string } }) {
         clearTimeout(slowTimer);
         clearTimeout(deadTimer);
         slowTimer = setTimeout(() => setSlow(true), 6000);
-        // Y una red debajo del aviso: si pasan dos minutos sin que llegue
+        // Y una red debajo del aviso: si pasan diez minutos sin que llegue
         // **nada**, se da el turno por muerto y se corta.
+        //
+        // Diez y no seis (el triple de los dos de antes) porque este plazo
+        // tiene que quedar por encima del peor caso del servidor, o lo
+        // cortaria a media faena: noventa segundos de espera al modelo
+        // elegido, mas ciento treinta y cinco recorriendo suplentes, mas
+        // doscientos setenta de ultima bala son ocho minutos y cuarto en los
+        // que legitimamente no llega nada.
         //
         // El servidor tiene sus propios topes, pero si se queda colgado por
         // cualquier motivo —una consulta que no vuelve, una conexion que no se
@@ -540,7 +547,7 @@ export function App({ user }: { user: { id: string; email: string } }) {
         deadTimer = setTimeout(() => {
           setError('El servidor ha dejado de responder. Lo que se habia generado esta guardado.');
           controller.abort();
-        }, 120_000);
+        }, 600_000);
       };
       watchSilence();
       let doneMeta: { id: string; reply_to?: string | null; version_index?: number } | null = null;

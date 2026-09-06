@@ -59,7 +59,7 @@ export async function streamCompletion(
     method: 'POST',
     headers: llmHeaders(),
     body: JSON.stringify({ ...body, stream: true }),
-    signal: signal ?? AbortSignal.timeout(180_000),
+    signal: signal ?? AbortSignal.timeout(540_000),
   });
 }
 
