@@ -141,7 +141,7 @@ const CREATE_DOCX: ToolSpec = {
   function: {
     name: 'crear_documento_word',
     description:
-      'Crea un documento de Word (.docx) descargable y lo muestra como tarjeta de archivo. Usala cuando pidan un documento, informe, carta o memo. Si no has leido ya la skill "docx" en esta conversacion, carga primero sus instrucciones con usar_skill antes de llamar a esta herramienta.',
+      'Crea un documento de Word (.docx) descargable y lo muestra como tarjeta de archivo. Usala cuando pidan un documento, informe, carta o memo. NO la uses para entregar codigo. Si lo que piden es una pagina web, un script o cualquier cosa que se guarda como .html, .css o .js, la entrega es el codigo en un bloque, no un .docx con el codigo pegado dentro: nadie puede abrir un Word en un navegador, y para usarlo hay que copiar y pegar a mano. Visto en produccion respondiendo "hazme una web para un negocio de Madrid" con un documento de Word. Si no has leido ya la skill "docx" en esta conversacion, carga primero sus instrucciones con usar_skill antes de llamar a esta herramienta.',
     parameters: {
       type: 'object',
       properties: {
