@@ -125,6 +125,18 @@
 - [x] Tablas del chat copiables como celdas: se escribe `text/html` y `text/plain` a la vez en el portapapeles, que es como Excel recibe celdas de verdad y no una linea de texto
 - [x] Bloques de codigo plegados con su interruptor, y el streaming deja de reparsear todo el markdown en cada trozo (cabecera memoizada + cola en texto plano)
 
+## Movil: usable desde la pantalla de inicio del iPhone
+
+- [x] Se instala como aplicacion: `manifest.webmanifest` con `display: standalone`, iconos PNG de 192 y 512, y el de iOS de 180 generado con margen para sobrevivir a la mascara redondeada (`scripts/iconos.mjs`) — iOS no acepta SVG ahi, y sin PNG ponia una miniatura de la pagina
+- [x] Bug encontrado leyendo el HTML servido, no suponiendo: Next emite `mobile-web-app-capable` (el nombre moderno) y **Safari lee `apple-mobile-web-app-capable`**. Sin esa linea, "Añadir a inicio" abria con la barra de Safari encima, que es justo lo que no se queria. Añadida por `metadata.other`
+- [x] `apple-mobile-web-app-title` para que bajo el icono ponga "NovaChat" y no el `<title>`, que cambia con cada conversacion
+- [x] **Nada escondido detras del raton**: en tactil no hay hover, asi que los "..." de conversaciones y proyectos, las acciones de cada mensaje (copiar/leer/reintentar) y el "copiar tabla" estaban simplemente invisibles. Ahora se ven siempre en movil, y lo que se toca mide 34-40 px en vez de 24. El escritorio se queda igual: todo va bajo `hover: none` o bajo el ancho de movil
+- [x] Zonas seguras del iPhone: `viewport-fit=cover` para que el fondo llegue al borde, y `env(safe-area-inset-*)` en la barra superior, el redactor, el cajon lateral y los modales — incluidos los laterales, que en apaisado la muesca se come el primer caracter de cada linea
+- [x] El redactor a 16 px en movil: por debajo de ese tamaño Safari amplia la pagina al enfocar un campo y se queda ampliada. La cura no es prohibir el zoom, que rompe la accesibilidad
+- [x] `overscroll-behavior: none` para que el rebote de Safari no despegue la aplicacion, y `touch-action: manipulation` para quitar el retardo del doble toque
+- [x] Modales a pantalla completa en movil (en 390 px una ventana centrada con margenes no deja sitio), galeria de artefactos a dos columnas, y el catalogo de skills y la portada de proyecto apilados
+- [x] Comprobado a 410 px de ancho contra produccion, no solo en local: el cajon lateral abre, los "..." salen sin pasar el raton, el redactor mide 16 px y las acciones de cada mensaje se ven
+
 ## Simplificación por petición directa del usuario (no exploración de claude.ai)
 
 - [x] Se quita el selector de modelo por completo: `ModelPicker.tsx` borrado, el campo "Modelo por defecto" de Ajustes fuera, `/api/models` ya no se consulta desde el cliente. Nova enruta siempre en automático (`model: 'auto'` fijo, ya no es estado). El selector de esfuerzo de razonamiento se muda a un componente propio y más ligero (`EffortPicker.tsx`, un desplegable de 4 opciones con `.pop`, no un modal de 248 modelos)
