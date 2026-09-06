@@ -806,7 +806,12 @@ async function unIntentoInterno(
 
   // Ultimo recurso: puede que la llamada venga escrita a mano en el texto.
   if (toolCalls.length === 0) {
-    const rescatadas = rescatarLlamadas(text);
+    const ofrecidas = new Set(
+      opts.tools
+        .map((t) => (t as { function?: { name?: string } })?.function?.name)
+        .filter((n): n is string => Boolean(n)),
+    );
+    const rescatadas = rescatarLlamadas(text, ofrecidas);
     if (rescatadas.toolCalls.length) {
       console.warn(
         `[novachat] ${opts.model} escribio ${rescatadas.toolCalls.length} llamada(s) como texto; rescatadas`,
@@ -838,11 +843,10 @@ async function unIntentoInterno(
  * como JSON (las columnas y las filas vienen asi); el resto se quedan como
  * cadena, que es lo que declara el esquema para titulos y subtitulos.
  */
-function rescatarLlamadas(texto: string): { toolCalls: ToolCall[]; resto: string } {
-  if (!texto.includes('<tool_call') && !texto.includes('<function=')) {
-    return { toolCalls: [], resto: texto };
-  }
-
+function rescatarLlamadas(
+  texto: string,
+  ofrecidas: Set<string>,
+): { toolCalls: ToolCall[]; resto: string } {
   const toolCalls: ToolCall[] = [];
   let resto = texto;
 
@@ -870,7 +874,7 @@ function rescatarLlamadas(texto: string): { toolCalls: ToolCall[]; resto: string
       args[campo[1]] = bruto;
     }
 
-    if (!Object.keys(args).length) continue;
+    if (!Object.keys(args).length || !ofrecidas.has(nombre)) continue;
     toolCalls.push({
       id: `call_${randomUUID().slice(0, 8)}`,
       name: nombre,
@@ -879,7 +883,113 @@ function rescatarLlamadas(texto: string): { toolCalls: ToolCall[]; resto: string
     resto = resto.replace(bloque[0], '');
   }
 
-  return { toolCalls, resto: resto.trim() };
+  if (toolCalls.length === 0) {
+    const enJson = rescatarJson(resto, ofrecidas);
+    if (enJson.toolCalls.length) return enJson;
+  }
+
+  return { toolCalls, resto: limpiarCola(resto) };
+}
+
+/**
+ * Quita los restos de sintaxis que quedan al arrancar una llamada del texto.
+ *
+ * La fuga de JSON venia envuelta en un corchete de mas ("[
+[{...}]"), asi que
+ * al sacar el valor quedaba ese corchete solo al final de la respuesta. Un
+ * mensaje jamas termina de verdad en un corchete o una llave **abiertos**. Los
+ * de cierre se respetan: "el array [1,2,3]" es un final legitimo.
+ */
+const limpiarCola = (t: string) => t.replace(/[\s,[{]+$/, '').trim();
+
+/**
+ * El otro dialecto: la llamada pegada como JSON al final de la respuesta.
+ *
+ * Visto explicando TCP frente a UDP. La explicacion ocupaba mil ciento sesenta
+ * caracteres y estaba bien; detras venian ocho mil de
+ * `[{"name":"crear_presentacion","parameters":{...}}]` en crudo, para una
+ * pregunta que no pedia ninguna presentacion.
+ *
+ * El candado es que el nombre este entre las herramientas que de verdad se han
+ * ofrecido en esta vuelta. Sin eso, a quien pida "dame un JSON con un campo
+ * name" se le ejecutaria su propio ejemplo.
+ */
+function rescatarJson(
+  texto: string,
+  ofrecidas: Set<string>,
+): { toolCalls: ToolCall[]; resto: string } {
+  const vacio = { toolCalls: [] as ToolCall[], resto: texto };
+  if (!/"name"\s*:/.test(texto)) return vacio;
+
+  for (let i = 0; i < texto.length; i++) {
+    const abre = texto[i];
+    if (abre !== '{' && abre !== '[') continue;
+
+    const fin = finDelValor(texto, i);
+    if (fin < 0) continue;
+
+    let dato: unknown;
+    try {
+      dato = JSON.parse(texto.slice(i, fin + 1));
+    } catch {
+      continue;
+    }
+
+    const candidatos = Array.isArray(dato) ? dato : [dato];
+    const llamadas: ToolCall[] = [];
+    for (const c of candidatos) {
+      if (!c || typeof c !== 'object') continue;
+      const o = c as Record<string, unknown>;
+      const nombre = typeof o.name === 'string' ? o.name : '';
+      const args = o.parameters ?? o.arguments ?? o.args;
+      if (!ofrecidas.has(nombre) || !args || typeof args !== 'object') continue;
+      llamadas.push({
+        id: `call_${randomUUID().slice(0, 8)}`,
+        name: nombre,
+        args: JSON.stringify(args),
+      });
+    }
+
+    if (llamadas.length) {
+      return {
+        toolCalls: llamadas,
+        resto: limpiarCola(texto.slice(0, i) + texto.slice(fin + 1)),
+      };
+    }
+  }
+
+  return vacio;
+}
+
+/**
+ * Donde termina el valor JSON que empieza en `desde`.
+ *
+ * Hace falta contar llaves a mano porque el JSON viene incrustado en prosa y
+ * no se sabe donde acaba. Las cadenas se saltan enteras: una llave dentro de
+ * comillas no cuenta, y una comilla escapada no cierra la cadena.
+ */
+function finDelValor(texto: string, desde: number): number {
+  let nivel = 0;
+  let enCadena = false;
+  let escapado = false;
+
+  for (let i = desde; i < texto.length; i++) {
+    const ch = texto[i];
+    if (enCadena) {
+      if (escapado) escapado = false;
+      else if (ch === '\\') escapado = true;
+      else if (ch === '"') enCadena = false;
+      continue;
+    }
+    if (ch === '"') enCadena = true;
+    else if (ch === '{' || ch === '[') nivel++;
+    else if (ch === '}' || ch === ']') {
+      nivel--;
+      if (nivel === 0) return i;
+      if (nivel < 0) return -1;
+    }
+  }
+  return -1;
 }
 
 function describeUpstreamError(status: number, detail: string, model: string) {
