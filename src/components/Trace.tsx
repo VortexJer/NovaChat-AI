@@ -260,9 +260,20 @@ const FILE_LABEL: Record<string, string> = {
   xlsx: 'Hoja de cálculo · XLSX',
 };
 
-function openPreview(name: string, previewHtml: string) {
+/**
+ * Abre la vista previa de un archivo ya generado.
+ *
+ * El `fileId` viaja con ella a proposito. Lo que se le pasa al visor es el
+ * HTML de la previsualizacion, no el .pptx, asi que su boton de descarga
+ * bajaba ese HTML con el nombre del documento — pedias la presentacion y te
+ * llevabas una pagina web. Con el id, el visor puede ofrecer el archivo de
+ * verdad, que es lo que la persona cree que esta descargando.
+ */
+function openPreview(name: string, previewHtml: string, fileId?: string) {
   window.dispatchEvent(
-    new CustomEvent('novachat:artifact', { detail: { lang: 'html', code: previewHtml, title: name } }),
+    new CustomEvent('novachat:artifact', {
+      detail: { lang: 'html', code: previewHtml, title: name, fileId },
+    }),
   );
 }
 
@@ -288,7 +299,7 @@ function FileCard({
   // primera vez que aparece esta tarjeta, no cada vez que se reabre el
   // historial de la conversacion.
   useEffect(() => {
-    if (autoOpen && previewHtml) openPreview(name, previewHtml);
+    if (autoOpen && previewHtml) openPreview(name, previewHtml, fileId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -298,7 +309,7 @@ function FileCard({
         type="button"
         className="filecard-main"
         disabled={!previewHtml}
-        onClick={() => previewHtml && openPreview(name, previewHtml)}
+        onClick={() => previewHtml && openPreview(name, previewHtml, fileId)}
       >
         <span className="ficon">
           <FileIcon size={16} />

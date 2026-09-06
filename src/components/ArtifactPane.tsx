@@ -5,7 +5,7 @@ import { nombreDeCodigo } from '@/lib/nombreArchivo';
 
 import { CopyButton } from './Markdown';
 
-export type Artifact = { lang: string; code: string; title?: string };
+export type Artifact = { lang: string; code: string; title?: string; fileId?: string };
 
 /**
  * Deja un solo documento en la vista previa.
@@ -92,7 +92,17 @@ export function ArtifactPane({
         <button
           className="icon-btn"
           onClick={() => {
-            // Descarga sin servidor: el contenido ya esta en memoria.
+            // Si esto es la vista previa de un archivo generado, lo que hay que
+            // bajar es el archivo, no la previsualizacion: quien abre un .pptx
+            // y le da a bajar espera su .pptx.
+            if (artifact.fileId) {
+              const a = document.createElement('a');
+              a.href = `/api/files/${artifact.fileId}`;
+              a.download = '';
+              a.click();
+              return;
+            }
+            // Si no hay archivo detras, el codigo ya esta en memoria.
             const blob = new Blob([artifact.code], { type: 'text/plain;charset=utf-8' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
