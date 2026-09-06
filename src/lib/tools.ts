@@ -865,7 +865,35 @@ async function useSkill(userId: string, name: string, already: Set<string>): Pro
   };
 }
 
+/**
+ * Extensiones que delatan que lo pedido no es un archivo de Office.
+ *
+ * El aviso de la descripcion y el del prompt del sistema no bastaban: el
+ * modelo seguia metiendo paginas web dentro de un .docx. Pero se delataba
+ * solo, porque llamaba al archivo por su nombre de verdad — "tostado-madrid
+ * .html" — y el saneado se comia el punto, asi que acababa entregando
+ * "tostado-madridhtml.docx".
+ *
+ * Ese nombre es una senal dura, no una interpretacion. Un aviso se puede
+ * ignorar; esto no, y ademas le dice exactamente que hacer en su lugar.
+ */
+const EXT_DE_CODIGO = /\.(html?|css|jsx?|tsx?|json|ya?ml|toml|sql|sh|bat|ps1|py|rb|php|go|rs|java|c|cpp|cs|xml|svg|csv|txt|md)$/i;
+
+function rechazarSiEsCodigo(titulo: string, formato: string): ToolResult | null {
+  const m = titulo.trim().match(EXT_DE_CODIGO);
+  if (!m) return null;
+  return {
+    forModel:
+      `Has llamado a este archivo "${titulo.trim()}", asi que lo que hay que entregar es un ${m[1].toLowerCase()}, no un ${formato}. ` +
+      `Se entrega en aquello con lo que se va a usar: un ${m[1].toLowerCase()} se abre en su programa o en el navegador, y metido dentro de un ${formato} habria que sacarlo copiando y pegando. ` +
+      `No vuelvas a llamar a esta herramienta: responde con el contenido en un bloque de codigo, indicando el nombre de archivo con el que guardarlo.`,
+  };
+}
+
 async function makeDocx(ctx: FileCtx, titulo: string, contenido: string, subtitulo?: string): Promise<ToolResult> {
+  const noVa = rechazarSiEsCodigo(titulo, 'documento de Word');
+  if (noVa) return noVa;
+
   const file = await createWordDocument(titulo, contenido, subtitulo);
   const fileId = await keep(ctx, file, wordPreviewHtml(titulo, contenido, subtitulo));
   return {
@@ -887,6 +915,9 @@ async function makePptx(
   diapositivas: SlideSpec[],
   tema?: Partial<PptxTheme>,
 ): Promise<ToolResult> {
+  const noVa = rechazarSiEsCodigo(titulo, 'presentacion de PowerPoint');
+  if (noVa) return noVa;
+
   if (diapositivas.length === 0) return { forModel: 'No se ha dado ninguna diapositiva.' };
   const file = await createPresentation(titulo, subtitulo, diapositivas, tema);
   const fileId = await keep(ctx, file, pptxPreviewHtml(titulo, subtitulo, diapositivas, tema));
@@ -904,6 +935,9 @@ async function makeXlsx(
   subtitulo?: string,
   notas?: string[],
 ): Promise<ToolResult> {
+  const noVa = rechazarSiEsCodigo(nombre, 'hoja de calculo');
+  if (noVa) return noVa;
+
   if (columnas.length === 0) return { forModel: 'No se ha dado ninguna columna.' };
 
   // Una fila con mas valores que columnas no es un detalle: **descoloca la

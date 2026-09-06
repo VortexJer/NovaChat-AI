@@ -1345,10 +1345,34 @@ export async function createPresentation(
       const gapX = proceso ? 0.42 : 0.22;
       const gapY = 0.2;
       const cardW = (SLIDE_W - MARGIN * 2 - gapX * (cols - 1)) / cols;
-      const cardH = (bottom - top - gapY * (rows - 1)) / rows;
+      const disponible = (bottom - top - gapY * (rows - 1)) / rows;
+
+      /**
+       * Las tarjetas se encogen al contenido, pero nunca por debajo de 2.1.
+       *
+       * Ese es el umbral de `roomy` dentro de drawCard: por debajo cambian el
+       * cuerpo y el alto del titulo, y la estimacion con la que se ha decidido
+       * encoger dejaria de valer. Manteniendose por encima, la cuenta sigue
+       * siendo la misma que se hizo.
+       *
+       * Toda la fila comparte alto — el mayor de sus tarjetas — o quedarian
+       * desiguales, que es peor que el hueco que se venia a quitar.
+       */
+      const roomy = disponible >= 2.1;
+      const necesario = Math.max(
+        ...points.map((pt) => altoTarjeta(pt, cardW, roomy)),
+      );
+      const cardH = roomy
+        ? Math.max(2.1, Math.min(disponible, necesario))
+        : disponible;
+      // Lo que se ahorra se reparte arriba y abajo: el bloque queda centrado en
+      // su banda en vez de colgando del borde superior.
+      const alto = cardH * rows + gapY * (rows - 1);
+      const y0 = top + Math.max(0, (bottom - top - alto) / 2);
+
       points.forEach((point, i) => {
         const x = MARGIN + (i % cols) * (cardW + gapX);
-        const y = top + Math.floor(i / cols) * (cardH + gapY);
+        const y = y0 + Math.floor(i / cols) * (cardH + gapY);
         drawCard(s, pptx, t, { x, y, w: cardW, h: cardH, index: i, point, compact: false });
 
         if (proceso && i % cols !== cols - 1 && i < points.length - 1) {
@@ -1486,6 +1510,33 @@ function initials(text: string): string {
 }
 
 /** Tarjeta con insignia numerada de color, mini-titulo en serif y texto. */
+/**
+ * Alto que de verdad necesita una tarjeta.
+ *
+ * Antes la altura salia solo de la banda disponible: se repartia el hueco
+ * entre las filas y cada tarjeta se quedaba con su trozo, tuviera dentro tres
+ * lineas o diez. Convirtiendo un .pptx nuestro a PDF se ve el resultado — en
+ * la diapositiva de proceso, media tarjeta vacia debajo del texto.
+ *
+ * El ancho de caracter se estima como la mitad del cuerpo, que es la regla de
+ * cajon para una sans a estos tamanos. No hace falta clavarlo: el valor solo
+ * se usa para **encoger**, nunca para crecer, y siempre queda acotado por el
+ * hueco real, asi que quedarse corto reparte un poco de aire de mas y pasarse
+ * no puede desbordar.
+ */
+function altoTarjeta(point: SlidePoint, w: number, roomy: boolean): number {
+  const pad = 0.2;
+  const badge = 0.44;
+  const cuerpo = roomy ? 10.5 : 10;
+  const anchoChar = (cuerpo * 0.5) / 72;
+  const porLinea = Math.max(12, Math.floor((w - pad * 2) / anchoChar));
+  const lineas = Math.max(1, Math.ceil((point.texto?.length ?? 0) / porLinea));
+  const altoTexto = (lineas * cuerpo * 1.2) / 72;
+  const titleH = roomy ? 0.6 : 0.4;
+  const pieEtiqueta = point.etiqueta && roomy ? 0.38 : 0;
+  return pad + badge + 0.14 + titleH + 0.04 + altoTexto + pieEtiqueta + pad;
+}
+
 function drawCard(
   s: PptxGenJS.Slide,
   pptx: PptxGenJS,
