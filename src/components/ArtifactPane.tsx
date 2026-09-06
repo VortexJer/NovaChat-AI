@@ -6,6 +6,27 @@ import { CopyButton } from './Markdown';
 
 export type Artifact = { lang: string; code: string; title?: string };
 
+/**
+ * Deja un solo documento en la vista previa.
+ *
+ * Los modelos pequenos repiten la pagina entera de vez en cuando: visto en
+ * produccion en una landing, donde el mensaje traia dos <!DOCTYPE> y las
+ * vallas de codigo pegadas ("```" seguido de "```html"). La vista previa
+ * pintaba las dos paginas seguidas con un "```html" suelto en medio, y lo que
+ * se entregaba parecia roto aunque la primera copia estuviera perfecta.
+ *
+ * Se corta en la segunda apertura de documento y se tiran las vallas sueltas.
+ * Solo afecta a lo que se ve: la pestana de codigo sigue mostrando lo que dijo
+ * el modelo, sin recortar.
+ */
+function unSoloDocumento(code: string): string {
+  const limpio = code.replace(/^\s*```[a-z]*\s*$/gim, '').trim();
+  const segundo = limpio.search(/<!DOCTYPE\s+html|<html[\s>]/i);
+  if (segundo < 0) return limpio;
+  const siguiente = limpio.slice(segundo + 1).search(/<!DOCTYPE\s+html|<html[\s>]/i);
+  return siguiente < 0 ? limpio : limpio.slice(0, segundo + 1 + siguiente).trimEnd();
+}
+
 /** Lenguajes que se pueden enseñar renderizados y no solo como texto. */
 const PREVIEWABLE = new Set(['html', 'svg', 'xml']);
 
@@ -44,7 +65,7 @@ export function ArtifactPane({
         svg{max-width:100%;max-height:100%}
       </style>${artifact.code}`;
     }
-    return artifact.code;
+    return unSoloDocumento(artifact.code);
   }, [artifact]);
 
   return (
