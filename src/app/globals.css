@@ -2502,6 +2502,20 @@ body {
     padding-bottom: calc(10px + env(safe-area-inset-bottom));
   }
 
+  /* En horizontal la muesca se come el lateral: sin esto, el primer caracter de
+     cada linea queda debajo. Se aplica a lo que ocupa todo el ancho. */
+  .topbar,
+  .thread-inner,
+  .composer-wrap,
+  .project-view {
+    padding-left: max(14px, env(safe-area-inset-left));
+    padding-right: max(14px, env(safe-area-inset-right));
+  }
+
+  .sidebar {
+    padding-left: env(safe-area-inset-left);
+  }
+
   .artifact {
     padding-top: env(safe-area-inset-top);
     padding-bottom: env(safe-area-inset-bottom);
