@@ -707,6 +707,16 @@ export function App({ user }: { user: { id: string; email: string } }) {
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+        /**
+         * El turno acaba cuando llega `done`, no cuando el servidor cierra.
+         *
+         * Antes se seguia leyendo hasta que el socket se cerraba por su cuenta,
+         * y como el vigilante de silencios se rearma con cada evento, `done`
+         * dejaba dos minutos mas de "esperando" con la luz parpadeando aunque
+         * la respuesta ya estuviera entera en pantalla. Ese era el "se queda
+         * atascado cuando la IA ya ha acabado".
+         */
+        let terminado = false;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -752,6 +762,7 @@ export function App({ user }: { user: { id: string; email: string } }) {
               }
             } else if (event.t === 'done') {
               doneMeta = { id: event.id, reply_to: event.reply_to, version_index: event.version_index };
+              terminado = true;
             } else if (event.t === 'tool') {
               // Si el turno ha creado un archivo, lo que se escriba despues es
               // la nota que lo acompaña: sale de golpe, con el archivo.
@@ -772,7 +783,12 @@ export function App({ user }: { user: { id: string; email: string } }) {
               setError(event.v);
             }
           }
+
+          if (terminado) break;
         }
+
+        // Soltar la conexion en vez de dejarla abierta hasta que expire.
+        void reader.cancel().catch(() => {});
       } catch (err) {
         // Abortar es una accion del usuario, no un fallo que reportar.
         abortado = (err as Error).name === 'AbortError';
