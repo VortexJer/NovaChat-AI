@@ -516,6 +516,9 @@ type RoundOpts = {
  */
 const SIN_PRIMERA_PALABRA_MS = 30_000;
 
+/** Lo que se espera al primer modelo cuando ya no queda ningun suplente libre. */
+const ULTIMA_ESPERA_MS = 90_000;
+
 /**
  * Una vuelta de conversacion, reintentando si el modelo se queda mudo.
  *
@@ -560,6 +563,7 @@ async function runRound(
   const cola = [opts.model, ...SUPLENTES.filter((m) => m !== opts.model)];
 
   let ultimoError: string | undefined;
+  let todosCapados = true;
   for (const model of cola) {
     const r = await unIntento({ ...opts, model });
 
@@ -568,10 +572,30 @@ async function runRound(
     // Lo ha parado el usuario, no el vigilante: no se le busca sustituto.
     if (opts.signal.aborted) return r;
 
+    if (r.mudo) todosCapados = false;
     ultimoError = r.error;
     if (model !== opts.model) {
       console.warn(`[novachat] ${model} sin respuesta (${r.agotado ? '429' : 'mudo'}), siguiente`);
     }
+  }
+
+  /**
+   * Ultima bala: el primero quiza solo iba lento.
+   *
+   * Se juega solo cuando **todos** los suplentes han devuelto 429, porque
+   * entonces no queda nadie a quien preguntar y esperar es gratis en
+   * comparacion con rendirse. Segun las analiticas del propio router, su
+   * tiempo medio hasta el primer token son catorce segundos y su latencia P95
+   * pasa de cincuenta: con treinta segundos de paciencia se estaban tirando
+   * respuestas que si llegaban.
+   *
+   * No se aplica siempre porque, cuando hay algun suplente libre, cambiar de
+   * modelo devuelve la respuesta en dos segundos — mucho mejor que esperar.
+   */
+  if (todosCapados && !opts.signal.aborted) {
+    console.warn('[novachat] todos los suplentes capados, esperando al primero');
+    const r = await unIntento(opts, ULTIMA_ESPERA_MS);
+    if (!r.mudo) return r;
   }
 
   return {
@@ -585,6 +609,7 @@ async function runRound(
 
 async function unIntento(
   opts: RoundOpts,
+  paciencia = SIN_PRIMERA_PALABRA_MS,
 ): Promise<{ text: string; toolCalls: ToolCall[]; error?: string; mudo?: boolean; agotado?: boolean }> {
   // Vigilante propio: se aborta la peticion al router sin tocar la del usuario,
   // para poder distinguir despues quien corto.
@@ -595,7 +620,7 @@ async function unIntento(
   let huboContenido = false;
   const reloj = setTimeout(() => {
     if (!huboContenido) vigilante.abort();
-  }, SIN_PRIMERA_PALABRA_MS);
+  }, paciencia);
 
   // Tope duro, que antes lo ponia `streamCompletion` con su propio timeout y
   // ahora se le pasa nuestra señal: una respuesta que empieza y no termina
