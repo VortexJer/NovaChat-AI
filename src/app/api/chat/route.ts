@@ -506,10 +506,10 @@ type RoundOpts = {
  * Cuanto se espera a la primera palabra antes de dar el intento por perdido.
  *
  * Medido contra este router: lo normal son entre seis y catorce segundos hasta
- * el primer caracter. Pero unas cuantas veces al dia el modelo gratuito que le
- * toca acepta la peticion y **no emite nada nunca**: se han visto esperas de
- * dos minutos terminando en nada. Como el router elige modelo en cada peticion,
- * volver a pedir suele caer en otro que si contesta.
+ * el primer caracter. Pero cuando las rutas estan en enfriamiento, "auto"
+ * acepta la peticion y **no emite nada nunca**: se han visto esperas de dos
+ * minutos terminando en nada. Pasado este plazo se pasa al siguiente modelo de
+ * SUPLENTES, que o contesta enseguida o devuelve su 429 al instante.
  *
  * Treinta segundos deja pasar holgadamente el caso lento de verdad y corta el
  * caso muerto mucho antes de que se note como "esto no va".
@@ -522,24 +522,70 @@ const SIN_PRIMERA_PALABRA_MS = 30_000;
  * Solo se reintenta cuando **no ha llegado nada**: si ya habia empezado a
  * escribir, cortar a mitad y volver a empezar seria peor que la pausa.
  */
+/**
+ * Modelos concretos a los que caer cuando el elegido no da nada.
+ *
+ * El router limita por modelo con enfriamientos de unos minutos. Cuando le
+ * toca a uno responde 429 al instante, lo cual es comodo: recorrer la lista
+ * entera cuesta milisegundos hasta dar con uno libre.
+ *
+ * El problema es "auto". Con todas las rutas en enfriamiento **no devuelve el
+ * 429: se queda colgado sin mandar un solo byte**. Comprobado a mano contra el
+ * router, sin pasar por esta aplicacion: "auto" agota los sesenta segundos con
+ * cero bytes mientras un modelo concreto libre contesta en menos de uno. Por
+ * eso, en cuanto "auto" se queda mudo, no se insiste con "auto" — se pregunta
+ * por nombre.
+ *
+ * Estan aqui los que el catalogo acepta de verdad. Ojo: /v1/models lista
+ * modelos que luego dan 404 al pedirles algo (claude-sonnet-4-5, entre otros),
+ * asi que esta lista sale de probarlos uno a uno, no de leer el catalogo.
+ */
+const SUPLENTES = (
+  process.env.FALLBACK_MODELS ?? 'gemini-3.6-flash,gpt-5.1,deepseek-v4-pro,kimi-k3,glm-5.2'
+)
+  .split(',')
+  .map((m) => m.trim())
+  .filter(Boolean);
+
+/**
+ * Una vuelta de conversacion, cambiando de modelo si el que toca no responde.
+ *
+ * Solo se cambia cuando **no ha llegado nada**: si ya habia empezado a
+ * escribir, cortar a mitad y volver a empezar con otro modelo seria peor que
+ * la pausa.
+ */
 async function runRound(
   opts: RoundOpts,
 ): Promise<{ text: string; toolCalls: ToolCall[]; error?: string }> {
-  for (let intento = 0; intento < 2; intento++) {
-    const r = await unIntento(opts);
-    if (!r.mudo) return r;
-    if (opts.signal.aborted) return r; // lo ha parado el usuario, no el vigilante
+  const cola = [opts.model, ...SUPLENTES.filter((m) => m !== opts.model)];
+
+  let ultimoError: string | undefined;
+  for (const model of cola) {
+    const r = await unIntento({ ...opts, model });
+
+    // Ha contestado (o ha fallado por algo que cambiar de modelo no arregla).
+    if (!r.mudo && !r.agotado) return r;
+    // Lo ha parado el usuario, no el vigilante: no se le busca sustituto.
+    if (opts.signal.aborted) return r;
+
+    ultimoError = r.error;
+    if (model !== opts.model) {
+      console.warn(`[novachat] ${model} sin respuesta (${r.agotado ? '429' : 'mudo'}), siguiente`);
+    }
   }
+
   return {
     text: '',
     toolCalls: [],
-    error: 'El modelo no ha empezado a responder en dos intentos. Vuelve a intentarlo.',
+    error:
+      ultimoError ??
+      'Ningun modelo del router esta disponible ahora mismo. Espera unos minutos y reintenta.',
   };
 }
 
 async function unIntento(
   opts: RoundOpts,
-): Promise<{ text: string; toolCalls: ToolCall[]; error?: string; mudo?: boolean }> {
+): Promise<{ text: string; toolCalls: ToolCall[]; error?: string; mudo?: boolean; agotado?: boolean }> {
   // Vigilante propio: se aborta la peticion al router sin tocar la del usuario,
   // para poder distinguir despues quien corto.
   const vigilante = new AbortController();
@@ -582,7 +628,7 @@ async function unIntentoInterno(
   opts: RoundOpts,
   signal: AbortSignal,
   marcarContenido: () => void,
-): Promise<{ text: string; toolCalls: ToolCall[]; error?: string }> {
+): Promise<{ text: string; toolCalls: ToolCall[]; error?: string; agotado?: boolean }> {
   let upstream = await streamCompletion(
     {
       model: opts.model,
@@ -599,7 +645,18 @@ async function unIntentoInterno(
   // No todos los modelos del router admiten herramientas, y el que no las
   // admite responde 400 en lugar de ignorarlas. En ese caso se reintenta sin
   // ellas: es preferible una respuesta sin busqueda a un error.
-  if (!upstream.ok && opts.tools.length > 0 && upstream.status >= 400 && upstream.status < 500) {
+  //
+  // El 429 queda fuera a proposito. Es "estas capado por ahora", no "no se
+  // usar herramientas": reintentar sin ellas gastaba otra peticion para volver
+  // a comerse el mismo 429, y de paso habria contestado sin poder crear el
+  // archivo que se le pedia.
+  if (
+    !upstream.ok &&
+    opts.tools.length > 0 &&
+    upstream.status >= 400 &&
+    upstream.status < 500 &&
+    upstream.status !== 429
+  ) {
     upstream = await streamCompletion(
       {
         model: opts.model,
@@ -613,7 +670,14 @@ async function unIntentoInterno(
 
   if (!upstream.ok || !upstream.body) {
     const detail = await upstream.text().catch(() => '');
-    return { text: '', toolCalls: [], error: describeUpstreamError(upstream.status, detail, opts.model) };
+    return {
+      text: '',
+      toolCalls: [],
+      error: describeUpstreamError(upstream.status, detail, opts.model),
+      // 429 es el enfriamiento por modelo del router. No es el final del
+      // camino: hay otros modelos y puede que alguno este libre.
+      agotado: upstream.status === 429,
+    };
   }
 
   const reader = upstream.body.getReader();
