@@ -225,3 +225,23 @@ export const Briefcase = ({ size = 14, className }: IconProps) => (
     <path d="M9 7V5h6v2" />
   </svg>
 );
+
+/** Enchufe: los conectores. */
+export const Plug = ({ size = 15 }: IconProps) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.7"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M9 2v6" />
+    <path d="M15 2v6" />
+    <path d="M6 8h12v3a6 6 0 0 1-6 6 6 6 0 0 1-6-6z" />
+    <path d="M12 17v5" />
+  </svg>
+);

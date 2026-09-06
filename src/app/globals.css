@@ -2564,3 +2564,55 @@ body {
     touch-action: auto;
   }
 }
+
+/* --- conectores ----------------------------------------------------------- */
+
+.conn-popular {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.conn-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 13.5px;
+}
+
+.conn-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 10px 0 8px;
+}
+
+.conn-filtros {
+  display: flex;
+  gap: 4px;
+}
+
+.act.on {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.conn-form {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+@media (max-width: 860px) {
+  .conn-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

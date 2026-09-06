@@ -134,3 +134,11 @@ export async function keyStatus(userId: string) {
     fromEnv: !saved.has(p.id) && Boolean(process.env[`${p.id.toUpperCase()}_API_KEY`]),
   }));
 }
+
+/**
+ * Los conectores guardan su token igual que las claves de API: mismo cifrado y
+ * mismo respaldo en claro cuando no hay `SECRETS_KEY`, para no tener dos
+ * formatos de secreto en la misma base de datos.
+ */
+export const encryptSecret = encrypt;
+export const decryptSecret = decrypt;

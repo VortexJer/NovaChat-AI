@@ -26,6 +26,7 @@ export type ToolUI =
   | { kind: 'images'; query: string; items: { url: string; thumb: string; credit: string; page: string }[] }
   | { kind: 'file'; name: string; type: 'docx' | 'pptx' | 'xlsx'; fileId: string; previewHtml?: string }
   | { kind: 'skill'; name: string; previewHtml?: string }
+  | { kind: 'connector'; connector: string; tool: string }
   | {
       kind: 'history';
       query: string;

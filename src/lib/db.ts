@@ -256,6 +256,24 @@ async function migrate() {
   await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS project_id TEXT`;
   await sql`CREATE INDEX IF NOT EXISTS conversations_project ON conversations (project_id)`;
 
+  // Conectores: servidores MCP que el usuario enchufa. `tools` y `last_error`
+  // son lo ultimo que se supo de el, para poder pintar su estado sin tener que
+  // llamarlo cada vez que se abre la pantalla.
+  await sql`
+    CREATE TABLE IF NOT EXISTS connectors (
+      id         TEXT PRIMARY KEY,
+      user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name       TEXT NOT NULL,
+      url        TEXT NOT NULL,
+      token      TEXT,
+      enabled    BOOLEAN NOT NULL DEFAULT true,
+      tools      INTEGER,
+      last_error TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS connectors_user ON connectors (user_id)`;
+
   // Tareas programadas: un encargo y su horario. `next_run` se calcula al
   // guardar y despues de cada ejecucion, para poder pedir "las que tocan ya"
   // con una comparacion simple en vez de interpretar horarios en SQL.

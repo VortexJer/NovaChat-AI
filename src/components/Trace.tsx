@@ -36,6 +36,12 @@ export function toolRunningLabel(name: string, args: Record<string, unknown>): s
     case 'buscar_historial':
       return `Buscando en conversaciones anteriores: "${args.consulta ?? ''}"`;
     default:
+      // Las de los conectores llegan con el nombre que publica su servidor:
+      // `mcp_<conector>_<herramienta>`. Se enseña lo ultimo, que es lo unico
+      // que le dice algo a quien mira.
+      if (name.startsWith('mcp_')) {
+        return `Usando el conector: ${name.split('_').slice(2).join('_') || name}`;
+      }
       return 'Usando una herramienta';
   }
 }
@@ -224,6 +230,16 @@ function StepRows({ step }: { step: TraceStep }) {
             name
           )}
         </span>
+      </div>
+    );
+  }
+
+  if (step.ui?.kind === 'connector') {
+    const { connector, tool } = step.ui;
+    return (
+      <div className="trace-step">
+        <span className="k">{connector}</span>
+        <span className="v">{tool}</span>
       </div>
     );
   }

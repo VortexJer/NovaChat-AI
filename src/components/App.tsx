@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type Artifact, ArtifactPane } from './ArtifactPane';
 import { Composer } from './Composer';
 import { EffortPicker } from './EffortPicker';
-import { Briefcase, Chevron, Clock, Dots, FileIcon, Folder, Grid, Keyboard, Logout, Menu, NovaMark, Pencil, Pin, Plus, Settings as Gear, Spark, Trash } from './icons';
+import { Briefcase, Chevron, Clock, Dots, FileIcon, Folder, Grid, Keyboard, Logout, Menu, NovaMark, Pencil, Pin, Plug, Plus, Settings as Gear, Spark, Trash } from './icons';
 import { KeysModal } from './KeysModal';
 import {
   readConversationsCache,
@@ -16,6 +16,7 @@ import {
 } from './localCache';
 import { KeyboardShortcutsModal } from './KeyboardShortcutsModal';
 import { ArtifactsModal } from './ArtifactsModal';
+import { ConnectorsModal } from './ConnectorsModal';
 import { ProjectView } from './ProjectView';
 import { TasksModal } from './TasksModal';
 import { SkillsModal } from './SkillsModal';
@@ -58,6 +59,7 @@ export function App({ user }: { user: { id: string; email: string } }) {
   const [userMenu, setUserMenu] = useState(false);
   const [keysOpen, setKeysOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
+  const [connectorsOpen, setConnectorsOpen] = useState(false);
   const [artifactsOpen, setArtifactsOpen] = useState(false);
   type ProjectRow = {
     id: string;
@@ -985,6 +987,9 @@ export function App({ user }: { user: { id: string; email: string } }) {
           <button className="side-nav-item" onClick={() => setTasksOpen(true)}>
             <Clock size={15} /> Programado
           </button>
+          <button className="side-nav-item" onClick={() => setConnectorsOpen(true)}>
+            <Plug size={15} /> Conectores
+          </button>
           <button className="side-nav-item" onClick={() => setSettingsOpen(true)}>
             <Briefcase size={15} /> Personalizar
           </button>
@@ -1382,6 +1387,7 @@ export function App({ user }: { user: { id: string; email: string } }) {
       {artifactsOpen && <ArtifactsModal onClose={() => setArtifactsOpen(false)} />}
       {tasksOpen && <TasksModal onClose={() => setTasksOpen(false)} />}
       {skillsOpen && <SkillsModal onClose={() => setSkillsOpen(false)} />}
+      {connectorsOpen && <ConnectorsModal onClose={() => setConnectorsOpen(false)} />}
 
       {shortcutsOpen && <KeyboardShortcutsModal onClose={() => setShortcutsOpen(false)} />}
 
