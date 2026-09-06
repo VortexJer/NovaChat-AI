@@ -264,3 +264,75 @@ export async function completeRound(
     return null;
   }
 }
+
+/**
+ * El catalogo de modelos del router, para armar la cola de suplentes.
+ *
+ * Antes los suplentes eran cinco nombres escritos a mano, y con el router
+ * capando por modelo se agotaban los cinco enseguida. Pero el catalogo trae
+ * doscientos cincuenta, ciento cincuenta y cuatro de ellos con herramientas:
+ * no hay razon para quedarse en cinco.
+ *
+ * Dos cosas que se aprendieron mirandolo de verdad:
+ *
+ * - **Ya viene ordenado.** El orden del catalogo coincide con el ranking que
+ *   el router publica en su pagina de modelos (Kimi K2.7 Code, Kimi K3,
+ *   DeepSeek V4 Pro...). No hay que reordenar nada.
+ * - **`available` miente a medias.** Marca 244 disponibles, pero varios
+ *   responden 404 "not in the catalog" al pedirles algo. Son entradas
+ *   "slot"/alias (Opus slot, Sonnet slot, Haiku slot) que reenvian a otro
+ *   modelo, mas `auto` y `fusion`. Se filtran por nombre.
+ */
+type ModeloCatalogo = {
+  id: string;
+  name?: string;
+  available?: boolean;
+  supported_parameters?: string[];
+};
+
+let cacheModelos: { cuando: number; lista: ModeloCatalogo[] } | null = null;
+const CACHE_MODELOS_MS = 10 * 60 * 1000;
+
+/** Alias y huecos que no son modelos de verdad y contestan 404. */
+function esAlias(m: ModeloCatalogo): boolean {
+  if (m.id === 'auto' || m.id === 'fusion') return true;
+  const n = m.name ?? '';
+  // Por palabra, no por subcadena: "llama-3.2-1b-unsloth" contiene "slot".
+  return /\bslot\b/i.test(n) || /auto-routed/i.test(n);
+}
+
+async function catalogo(): Promise<ModeloCatalogo[]> {
+  if (cacheModelos && Date.now() - cacheModelos.cuando < CACHE_MODELOS_MS) {
+    return cacheModelos.lista;
+  }
+  try {
+    const res = await fetch(`${BASE}/models`, {
+      headers: llmHeaders(),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) return cacheModelos?.lista ?? [];
+    const data = (await res.json()) as { data?: ModeloCatalogo[] };
+    const lista = data.data ?? [];
+    if (lista.length) cacheModelos = { cuando: Date.now(), lista };
+    return lista;
+  } catch {
+    // Si el catalogo no se puede leer se sigue con lo ultimo que se supo; y si
+    // no se supo nada, sin suplentes. Nunca tumbar el turno por esto.
+    return cacheModelos?.lista ?? [];
+  }
+}
+
+/**
+ * Los modelos a los que caer, en orden de ranking.
+ *
+ * @param conHerramientas cuando el turno lleva herramientas, se descartan los
+ *   modelos que no las admiten: contestarian ignorandolas y el archivo que se
+ *   pedia no llegaria a crearse nunca.
+ */
+export async function colaDeSuplentes(conHerramientas: boolean): Promise<string[]> {
+  const lista = await catalogo();
+  return lista
+    .filter((m) => m.available !== false && !esAlias(m))
+    .filter((m) => !conHerramientas || (m.supported_parameters ?? []).includes('tools'))
+    .map((m) => m.id);
+}

@@ -2,7 +2,13 @@ import { randomUUID } from 'node:crypto';
 
 import { currentUser } from '@/lib/auth';
 import { ready, sql } from '@/lib/db';
-import { type ChatMessage, complete, streamCompletion, TITLE_MODEL } from '@/lib/llm';
+import {
+  type ChatMessage,
+  colaDeSuplentes,
+  complete,
+  streamCompletion,
+  TITLE_MODEL,
+} from '@/lib/llm';
 import { DEFAULT_SYSTEM_PROMPT, renderPrompt, TITLE_PROMPT } from '@/lib/prompt';
 import { projectPromptBlock } from '@/lib/projects';
 import { getSkillContent } from '@/lib/skills';
@@ -543,12 +549,23 @@ const ULTIMA_ESPERA_MS = 90_000;
  * modelos que luego dan 404 al pedirles algo (claude-sonnet-4-5, entre otros),
  * asi que esta lista sale de probarlos uno a uno, no de leer el catalogo.
  */
-const SUPLENTES = (
-  process.env.FALLBACK_MODELS ?? 'gemini-3.6-flash,gpt-5.1,deepseek-v4-pro,kimi-k3,glm-5.2'
-)
-  .split(',')
-  .map((m) => m.trim())
-  .filter(Boolean);
+/**
+ * Cuanto se le da a cada suplente para arrancar.
+ *
+ * Menos que al modelo elegido: cuando quedan ciento cincuenta candidatos
+ * detras, insistir con uno lento sale mas caro que probar el siguiente.
+ */
+const PACIENCIA_SUPLENTE_MS = 15_000;
+
+/**
+ * Tope de reloj para todo el recorrido de suplentes.
+ *
+ * Los capados contestan 429 en tres decimas y los alias 404 igual de rapido,
+ * asi que recorrer decenas de modelos no gasta presupuesto: solo lo gastan los
+ * que se quedan colgados. Con esto, el peor caso del turno queda por debajo de
+ * los 180 s del tope general (30 del primero + 45 aqui + 90 de la ultima bala).
+ */
+const PRESUPUESTO_SUPLENTES_MS = 45_000;
 
 /**
  * Una vuelta de conversacion, cambiando de modelo si el que toca no responde.
@@ -560,25 +577,40 @@ const SUPLENTES = (
 async function runRound(
   opts: RoundOpts,
 ): Promise<{ text: string; toolCalls: ToolCall[]; error?: string }> {
-  const cola = [opts.model, ...SUPLENTES.filter((m) => m !== opts.model)];
+  // El elegido, con la paciencia normal.
+  const primero = await unIntento(opts);
+  if (!primero.mudo && !primero.agotado) return primero;
+  if (opts.signal.aborted) return primero;
 
-  let ultimoError: string | undefined;
+  let ultimoError = primero.error;
+  // Si nadie llega a arrancar, se sabra si fue por cuota (reintentar mas tarde
+  // tiene sentido) o porque todos se colgaron (no lo tiene).
   let todosCapados = true;
-  for (const model of cola) {
-    const r = await unIntento({ ...opts, model });
+  let probados = 0;
 
-    // Ha contestado (o ha fallado por algo que cambiar de modelo no arregla).
-    if (!r.mudo && !r.agotado) return r;
-    // Lo ha parado el usuario, no el vigilante: no se le busca sustituto.
+  const suplentes = (await colaDeSuplentes(opts.tools.length > 0)).filter(
+    (m) => m !== opts.model,
+  );
+  const limite = Date.now() + PRESUPUESTO_SUPLENTES_MS;
+
+  for (const model of suplentes) {
+    if (Date.now() >= limite) {
+      console.warn(`[novachat] presupuesto agotado tras ${probados} suplentes`);
+      todosCapados = false; // no se llego al final: quedaba gente por preguntar
+      break;
+    }
+
+    const r = await unIntento({ ...opts, model }, PACIENCIA_SUPLENTE_MS);
+    probados++;
+
+    if (!r.mudo && !r.agotado) {
+      console.warn(`[novachat] responde ${model} tras ${probados} intentos`);
+      return r;
+    }
     if (opts.signal.aborted) return r;
 
-    ultimoError = r.error;
-    // Solo cuentan los suplentes. Que el primero se quede mudo es la condicion
-    // para llegar hasta aqui, no una senal de que quede alguien libre.
-    if (model !== opts.model) {
-      if (!r.agotado) todosCapados = false;
-      console.warn(`[novachat] ${model} sin respuesta (${r.agotado ? '429' : 'mudo'}), siguiente`);
-    }
+    ultimoError = r.error ?? ultimoError;
+    if (!r.agotado) todosCapados = false;
   }
 
   /**
@@ -595,7 +627,7 @@ async function runRound(
    * modelo devuelve la respuesta en dos segundos — mucho mejor que esperar.
    */
   if (todosCapados && !opts.signal.aborted) {
-    console.warn('[novachat] todos los suplentes capados, esperando al primero');
+    console.warn(`[novachat] ${probados} suplentes capados, esperando al primero`);
     const r = await unIntento(opts, ULTIMA_ESPERA_MS);
     if (!r.mudo) return r;
   }
