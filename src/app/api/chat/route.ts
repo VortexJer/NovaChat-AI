@@ -385,10 +385,21 @@ export async function POST(req: Request) {
               tools: [...tools, NO_TOOL],
               forceTool: true,
               signal: abort.signal,
-              onDelta: (v) => {
-                text += v;
-                send({ t: 'delta', v });
-              },
+              /**
+               * Esta vuelta existe para arrancar una llamada a herramienta, no
+               * para hablar: lo que diga se tira.
+               *
+               * Antes se sumaba a la respuesta, y cuando el modelo en vez de
+               * llamar a la herramienta volvia a escribir lo mismo, al usuario
+               * le llegaba dos veces. Visto con una calculadora de propinas en
+               * HTML: la pagina entera repetida, con la valla de codigo suelta
+               * en medio y el <script> en un bloque aparte etiquetado "php".
+               * Se le echaba la culpa al modelo; era esta linea.
+               *
+               * No se pierde nada: si la llamada sale, la vuelta siguiente es
+               * la que redacta el mensaje que acompaña al archivo.
+               */
+              onDelta: () => {},
               onReasoning: () => {},
             });
 
