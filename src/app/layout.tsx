@@ -63,13 +63,16 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: '#0b0c0e',
-  // El navegador movil no debe hacer zoom al enfocar el redactor, pero el
-  // usuario si puede ampliar a mano: bloquearlo del todo rompe accesibilidad.
-  // (El zoom al enfocar se evita con 16px de fuente en el redactor, no
-  // prohibiendolo.)
+  // Anclada a la pantalla de inicio, la aplicacion no se amplia con los dedos:
+  // un pellizco aqui no acerca "un poco", desplaza toda la interfaz y la deja
+  // corrida, y sin barra del navegador no hay forma comoda de volver. El zoom
+  // al enfocar un campo se evita aparte, con 16px de fuente en el redactor.
+  // Para leer mas grande esta el tamano de texto del propio iOS, que es donde
+  // se cambia de verdad.
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 5,
+  maximumScale: 1,
+  userScalable: false,
   // Que la pagina llegue hasta debajo de la muesca y del indicador de inicio;
   // el hueco se recupera con `env(safe-area-inset-*)` donde hace falta.
   viewportFit: 'cover',

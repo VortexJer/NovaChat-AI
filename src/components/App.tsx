@@ -14,6 +14,7 @@ import { ProjectView } from './ProjectView';
 import { TasksModal } from './TasksModal';
 import { SkillsModal } from './SkillsModal';
 import { MessageList } from './MessageList';
+import { MobileViewport } from './MobileViewport';
 import { SearchModal } from './SearchModal';
 import { SettingsModal } from './SettingsModal';
 import { toolRunningLabel } from './Trace';
@@ -869,6 +870,10 @@ export function App({ user }: { user: { id: string; email: string } }) {
     <div
       className={`shell${collapsed ? ' collapsed' : ''}${artifact ? ' with-artifact' : ''}`}
     >
+      {/* No pinta nada: mide lo que de verdad se ve cuando sale el teclado del
+          movil y corta el zoom de dos dedos. */}
+      <MobileViewport />
+
       {sidebarOpen && <div className="scrim" onClick={() => setSidebarOpen(false)} />}
 
       <aside className={`sidebar${sidebarOpen ? ' open' : ''}`}>

@@ -146,7 +146,11 @@ button {
   z-index: 1;
   display: grid;
   grid-template-columns: var(--sidebar-w) 1fr;
-  height: 100dvh;
+  /* `--alto-visible` lo pone `MobileViewport` con lo que de verdad queda a la
+     vista: al salir el teclado del movil, `100dvh` sigue contando la pantalla
+     entera y el redactor se queda debajo del teclado. En escritorio la variable
+     no existe y manda `100dvh`. */
+  height: var(--alto-visible, 100dvh);
 }
 
 /* --- barra lateral ------------------------------------------------------- */
@@ -2560,5 +2564,34 @@ body {
   input[type='password'],
   input[type='search'] {
     font-size: 16px;
+  }
+}
+
+/* La aplicacion no se mueve: es una pantalla, no un documento.
+   `position: fixed` en el cuerpo evita que el gesto de desplazar arrastre toda
+   la pagina —el scroll vive dentro del hilo y de la barra lateral—, y sin esto
+   al abrirse el teclado iOS sube el documento entero y la cabecera se va. */
+@media (max-width: 860px) {
+  body {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+  }
+
+  /* El pellizco se corta tambien por CSS: `pan-y` deja arrastrar para
+     desplazar, que es lo que si hace falta, y descarta el zoom. */
+  .shell,
+  .thread,
+  .sidebar,
+  .modal {
+    touch-action: pan-y;
+  }
+
+  /* Menos lo que de verdad puede necesitar moverse en las dos direcciones: una
+     tabla ancha o un bloque de codigo largo. */
+  .table-block,
+  .md pre,
+  .artifact {
+    touch-action: auto;
   }
 }
