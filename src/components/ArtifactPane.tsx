@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { nombreDeCodigo } from '@/lib/nombreArchivo';
 
 import { CopyButton } from './Markdown';
 
@@ -96,7 +97,7 @@ export function ArtifactPane({
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `artefacto.${artifact.lang === 'texto' ? 'txt' : artifact.lang}`;
+            a.download = nombreDeCodigo(artifact.code, artifact.lang, artifact.title);
             a.click();
             URL.revokeObjectURL(url);
           }}

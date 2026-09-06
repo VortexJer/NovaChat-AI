@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useState } from 'react';
+import { nombreDeCodigo } from '@/lib/nombreArchivo';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
@@ -83,6 +84,27 @@ function CodeBlock({ children, ...props }: React.HTMLAttributes<HTMLPreElement>)
               Abrir
             </button>
           )}
+          {/*
+            Descargar tambien desde el chat, no solo desde el visor.
+            Un bloque de codigo largo es un archivo que todavia no existe: sin
+            esto habia que abrir el visor o seleccionar y copiar a mano
+            trescientas lineas.
+          */}
+          <button
+            className="act"
+            title="Guardar como archivo"
+            onClick={() => {
+              const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = nombreDeCodigo(text, lang);
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+          >
+            Bajar
+          </button>
           <CopyButton text={text} />
         </span>
       </div>
