@@ -135,6 +135,8 @@
 - [x] El redactor a 16 px en movil: por debajo de ese tamaño Safari amplia la pagina al enfocar un campo y se queda ampliada. La cura no es prohibir el zoom, que rompe la accesibilidad
 - [x] `overscroll-behavior: none` para que el rebote de Safari no despegue la aplicacion, y `touch-action: manipulation` para quitar el retardo del doble toque
 - [x] Modales a pantalla completa en movil (en 390 px una ventana centrada con margenes no deja sitio), galeria de artefactos a dos columnas, y el catalogo de skills y la portada de proyecto apilados
+- [x] **La aplicacion no se mueve**: cuerpo `fixed` en movil y `touch-action: pan-y`, dejando en `auto` lo que si necesita moverse en las dos direcciones (una tabla ancha, un bloque de codigo). El pellizco se corta por las tres vias porque cada una falla por su lado: `user-scalable=no`, el CSS, y el gesto propio de Safari, que ignora el viewport cuando se navega desde el navegador. Es una decision consciente para una aplicacion instalada: para leer mas grande esta el tamano de texto de iOS
+- [x] **El teclado no tapa el redactor**: iOS no encoge la ventana al abrirlo, sube la pagina por encima; y `100dvh` cuenta la barra del navegador, no el teclado. `MobileViewport` lee `visualViewport` y publica `--alto-visible`, que es lo que mide la aplicacion. Verificado en produccion bajando la medida a 470 px: el borde inferior del redactor queda exactamente en 470
 - [x] Comprobado a 410 px de ancho contra produccion, no solo en local: el cajon lateral abre, los "..." salen sin pasar el raton, el redactor mide 16 px y las acciones de cada mensaje se ven
 
 ## Simplificación por petición directa del usuario (no exploración de claude.ai)
