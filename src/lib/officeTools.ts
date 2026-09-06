@@ -213,15 +213,40 @@ function buildTable(header: string[], rows: string[][]): Table {
   });
 }
 
-/** Trocea una linea en TextRun, aplicando negrita a los tramos **entre asteriscos dobles** y las propiedades base a todos los tramos. */
+/**
+ * Trocea una linea en TextRun aplicando el enfasis de markdown.
+ *
+ * Entiende **negrita** y *cursiva*. Lo segundo se anadio despues de ver un
+ * informe entregado en produccion cuyo pie decia, con los asteriscos a la
+ * vista: "*Nota: Los datos son de ejemplo*". Solo se manejaba el asterisco
+ * doble, asi que el simple viajaba literal hasta el documento — y en un Word
+ * el marcado crudo canta muchisimo mas que en un chat.
+ *
+ * El orden importa: primero se parte por los dobles, y dentro de cada tramo
+ * que no sea negrita se buscan los simples. Al reves, "**texto**" se comeria
+ * como una cursiva vacia.
+ */
 function runsFrom(text: string, base: { bold?: boolean; color?: string; size?: number } = {}): TextRun[] {
+  const cursivas = (trozo: string, extra: { bold?: boolean }): TextRun[] =>
+    trozo
+      // Un asterisco suelto rodeado de espacios (una multiplicacion, una
+      // vineta) no abre enfasis: se exige que pegue al texto por dentro.
+      .split(/(\*[^*\s][^*]*\*|_[^_\s][^_]*_)/g)
+      .filter(Boolean)
+      .map((part) =>
+        (part.startsWith('*') && part.endsWith('*') && part.length > 2) ||
+        (part.startsWith('_') && part.endsWith('_') && part.length > 2)
+          ? new TextRun({ ...base, ...extra, text: part.slice(1, -1), italics: true })
+          : new TextRun({ ...base, ...extra, text: part }),
+      );
+
   return text
     .split(/(\*\*[^*]+\*\*)/g)
     .filter(Boolean)
-    .map((part) =>
+    .flatMap((part) =>
       part.startsWith('**') && part.endsWith('**')
-        ? new TextRun({ ...base, text: part.slice(2, -2), bold: true })
-        : new TextRun({ ...base, text: part }),
+        ? cursivas(part.slice(2, -2), { bold: true })
+        : cursivas(part, {}),
     );
 }
 

@@ -154,7 +154,7 @@ const CREATE_DOCX: ToolSpec = {
         contenido: {
           type: 'string',
           description:
-            'Cuerpo en Markdown sencillo: # ## ### para secciones, lineas con - para listas, **negrita**, y tablas con barras verticales (fila de cabecera, luego |---|---|, luego las filas de datos). Un parrafo por linea.',
+            'Cuerpo en Markdown sencillo: # ## ### para secciones, lineas con - para listas, **negrita**, *cursiva*, y tablas con barras verticales (fila de cabecera, luego |---|---|, luego las filas de datos). Un parrafo por linea. TODAS las secciones llevan su encabezado con almohadillas, incluida la primera: si una va sin ellas queda como parrafo suelto y desaparece del panel de navegacion de Word, que es justo donde se busca un informe largo.',
         },
       },
       required: ['titulo', 'contenido'],
