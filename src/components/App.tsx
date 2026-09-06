@@ -689,7 +689,7 @@ export function App({ user }: { user: { id: string; email: string } }) {
         });
 
         if (!res.ok || !res.body) {
-          setError((await res.text().catch(() => '')) || 'El servidor no ha respondido.');
+          setError(await fallo(res));
           return;
         }
 
@@ -1477,4 +1477,38 @@ function groupByDate(list: Conversation[]): [string, Conversation[]][] {
     if (items?.length) groups.push([label, items]);
   }
   return groups;
+}
+
+/**
+ * Convierte una respuesta fallida en una frase que se pueda leer.
+ *
+ * El cuerpo de un error **no siempre es nuestro**. Cuando Render reinicia la
+ * instancia, su balanceador responde antes de que la peticion llegue a la
+ * aplicacion, y lo que devuelve es su pagina 502: cuarenta kilobytes de HTML
+ * con las tipografias incrustadas en base64. Eso se estaba volcando entero en
+ * el banner de error, encima de la conversacion, y parecia que el modelo habia
+ * contestado con codigo.
+ *
+ * Asi que solo se confia en el cuerpo cuando es texto plano y corto, que es
+ * justo la forma de los errores de esta aplicacion ("No autenticado",
+ * "Conversacion no encontrada"). Para todo lo demas manda el codigo de estado.
+ */
+async function fallo(res: Response): Promise<string> {
+  const tipo = res.headers.get('content-type') ?? '';
+  const nuestro = tipo.startsWith('text/plain') || tipo.startsWith('application/json');
+
+  if (nuestro) {
+    const cuerpo = (await res.text().catch(() => '')).trim();
+    // El limite descarta de paso cualquier pagina de error que llegue mal
+    // etiquetada, sin tener que adivinar de quien es.
+    if (cuerpo && cuerpo.length <= 300 && !cuerpo.startsWith('<')) return cuerpo;
+  }
+
+  if (res.status === 401) return 'Se ha cerrado la sesion. Vuelve a entrar.';
+  if (res.status === 413) return 'El mensaje o los archivos son demasiado grandes.';
+  if (res.status === 429) return 'Demasiadas peticiones seguidas. Espera un momento.';
+  if (res.status >= 500) {
+    return 'El servidor no estaba disponible (probablemente reiniciandose). Dale a Reintentar en unos segundos.';
+  }
+  return `El servidor no ha respondido (error ${res.status}).`;
 }

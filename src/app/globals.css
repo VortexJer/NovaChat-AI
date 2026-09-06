@@ -1876,6 +1876,12 @@ button {
   border-color: rgba(255, 59, 48, 0.35);
   background: rgba(255, 59, 48, 0.09);
   color: #ff8a80;
+  /* Cinturon: el texto de un error viene de fuera y no siempre es corto.
+     Aunque se cuele algo largo, se queda dentro de su caja en vez de empujar
+     la conversacion pantallas abajo. */
+  max-height: 8em;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
 }
 
 /* --- movil --------------------------------------------------------------- */
