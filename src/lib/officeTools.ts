@@ -1627,6 +1627,50 @@ export async function createSpreadsheet(
   // Cuanto ha bajado la tabla respecto a "cabecera en la fila 1".
   const rowOffset = headerRowNumber - 1;
 
+  /**
+   * Una celda no puede referirse a si misma.
+   *
+   * Visto en produccion en un presupuesto de reforma: la columna de totales
+   * traia `=E16*D16` dentro de la propia E16, y lo mismo en las filas de
+   * subtotal, imprevistos, base e IVA. Excel abre eso con aviso de referencia
+   * circular y muestra ceros — el archivo entregado no sirve, pero por fuera
+   * parece perfecto, asi que conviene cortarlo aqui y no fiarlo a que alguien
+   * lo note al abrirlo.
+   *
+   * Va aqui y no en la herramienta porque la fila real de cada dato depende de
+   * si hay subtitulo y leyenda: solo en este punto se sabe.
+   */
+  const circulares: string[] = [];
+  rows.forEach((row, i) => {
+    const fila = headerRowNumber + 1 + i;
+    columns.forEach((_col, j) => {
+      const raw = row[j];
+      if (!isFormula(raw)) return;
+      const yo = `${colLetter(j + 1)}${fila}`;
+      const movida = shiftFormulaRows(raw.formula, rowOffset);
+      // Delimitado a mano:  no vale, porque "E1" casaria dentro de "E16".
+      // El String.raw es para que el `\$` llegue al regex como dolar literal
+      // (una referencia absoluta, $E$16) y no como ancla de fin de cadena: eso
+      // ultimo compila a "$?" y revienta con "Nothing to repeat".
+      // El dolar de las referencias absolutas puede ir en los dos sitios:
+      // E16, $E16, E$16 y $E$16 son todas la misma celda.
+      const suyo = new RegExp(
+        String.raw`(^|[^A-Z0-9$])\$?` +
+          colLetter(j + 1) +
+          String.raw`\$?` +
+          fila +
+          String.raw`(?![0-9])`,
+        'i',
+      );
+      if (suyo.test(movida)) {
+        circulares.push(`${yo} ("${columns[j]?.nombre ?? ''}") con "=${movida}"`);
+      }
+    });
+  });
+  if (circulares.length) {
+    throw new FormulaCircular(circulares);
+  }
+
   rows.forEach((row, i) => {
     const excelRow = sheet.getRow(headerRowNumber + 1 + i);
     const isTotals = i === totalsIndex;
@@ -1693,6 +1737,29 @@ export async function createSpreadsheet(
     mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     kind: 'xlsx',
   };
+}
+
+/**
+ * Se lanza cuando una celda calculada se nombra a si misma.
+ *
+ * Lleva la lista de celdas culpables para que el mensaje que ve el modelo
+ * pueda ser concreto y corregible en el mismo turno.
+ */
+export class FormulaCircular extends Error {
+  constructor(public readonly celdas: string[]) {
+    super(`Formulas circulares: ${celdas.join('; ')}`);
+  }
+}
+
+/** Numero de columna (1) a letra de Excel (A). */
+function colLetter(n: number): string {
+  let s = '';
+  while (n > 0) {
+    const r = (n - 1) % 26;
+    s = String.fromCharCode(65 + r) + s;
+    n = Math.floor((n - r) / 26);
+  }
+  return s;
 }
 
 /**

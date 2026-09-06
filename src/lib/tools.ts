@@ -14,6 +14,7 @@ import {
   type PptxTheme,
   type SlideLayout,
   type SlideSpec,
+  FormulaCircular,
 } from './officeTools';
 import { getKey } from './secrets';
 import { getSkillContent, listSkills, type SkillSummary } from './skills';
@@ -904,7 +905,26 @@ async function makeXlsx(
     };
   }
 
-  const file = await createSpreadsheet(nombre, columnas, filas, subtitulo, notas);
+  let file;
+  try {
+    file = await createSpreadsheet(nombre, columnas, filas, subtitulo, notas);
+  } catch (err) {
+    // Una formula que se nombra a si misma no es un fallo del generador: es un
+    // dato mal construido que solo el modelo puede arreglar, asi que se le
+    // devuelve como mensaje y no como excepcion.
+    if (err instanceof FormulaCircular) {
+      return {
+        forModel:
+          `Estas celdas se refieren a si mismas: ${err.celdas.join('; ')}. ` +
+          `Excel las abre con error de referencia circular y muestra cero. ` +
+          `Una celda calculada tiene que salir de OTRAS celdas: un total de partida es cantidad por precio ` +
+          `de su propia fila; un subtotal suma el rango de la columna de totales (no la de precios unitarios); ` +
+          `y un impuesto se aplica sobre la celda de base imponible, nunca sobre si mismo. ` +
+          `Corrige esas celdas y vuelve a llamar a la herramienta.`,
+      };
+    }
+    throw err;
+  }
   const fileId = await keep(ctx, file, xlsxPreviewHtml(nombre, columnas, filas, subtitulo, notas));
   return {
     forModel: `Hoja de calculo creada: ${file.name}, ${filas.length} filas. Ya se ha mostrado como tarjeta descargable.`,
