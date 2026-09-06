@@ -320,6 +320,18 @@ export async function POST(req: Request) {
         for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
           const offerTools = tools.length > 0 && round < MAX_TOOL_ROUNDS;
 
+          /**
+           * Un turno con herramientas habla varias veces, y lo que dice en
+           * cada vuelta se iba pegando sin nada en medio: "monto la
+           * tabla.Listo. El archivo...". Una linea en blanco entre vueltas es
+           * lo que separa dos parrafos de verdad.
+           */
+          if (round > 0 && text && !/\s$/.test(text)) {
+            const separador = '\n\n';
+            text += separador;
+            send({ t: 'delta', v: separador });
+          }
+
           const result = await runRound({
             model,
             messages: conversation,
