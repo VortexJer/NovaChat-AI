@@ -478,9 +478,31 @@ function asColumns(v: unknown): ColumnSpec[] {
   });
 }
 
+/**
+ * Saca el array de celdas de una fila, venga como venga.
+ *
+ * El esquema pide un array por fila, pero se ha visto a un modelo mandarlas
+ * envueltas — `{ "celdas": [...] }` — en una tabla de amortizacion de sesenta
+ * cuotas. Como aqui una fila que no es array se descartaba entera, el Excel
+ * salia con las sesenta y una filas en blanco: bien construido por fuera y
+ * vacio por dentro. Desenvolverla cuesta tres lineas y evita tirar un trabajo
+ * que estaba bien hecho.
+ */
+function celdasDeFila(row: unknown): unknown[] {
+  if (Array.isArray(row)) return row;
+  if (row && typeof row === 'object') {
+    for (const clave of ['celdas', 'cells', 'valores', 'values']) {
+      const dentro = (row as Record<string, unknown>)[clave];
+      if (Array.isArray(dentro)) return dentro;
+    }
+  }
+  return [];
+}
+
 function asXlsxRows(v: unknown): CellValue[][] {
   if (!Array.isArray(v)) return [];
-  return v.map((row) => {
+  return v.map((fila) => {
+    const row = celdasDeFila(fila);
     if (!Array.isArray(row)) return [];
     return row.map((c): CellValue => {
       if (typeof c === 'number') return c;

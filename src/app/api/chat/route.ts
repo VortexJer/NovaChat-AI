@@ -804,7 +804,82 @@ async function unIntentoInterno(
   // la respuesta con la llamada, asi que se inventa si falta.
   for (const call of toolCalls) call.id ||= `call_${randomUUID().slice(0, 8)}`;
 
+  // Ultimo recurso: puede que la llamada venga escrita a mano en el texto.
+  if (toolCalls.length === 0) {
+    const rescatadas = rescatarLlamadas(text);
+    if (rescatadas.toolCalls.length) {
+      console.warn(
+        `[novachat] ${opts.model} escribio ${rescatadas.toolCalls.length} llamada(s) como texto; rescatadas`,
+      );
+      return { text: rescatadas.resto, toolCalls: rescatadas.toolCalls };
+    }
+  }
+
   return { text, toolCalls };
+}
+
+/**
+ * Rescata llamadas a herramientas que el modelo ha escrito como texto.
+ *
+ * Varios modelos abiertos del router (Qwen, Hermes y parecidos) no emiten
+ * `tool_calls` en el JSON: escupen en el contenido un XML con esta forma
+ *
+ *     <tool_call><function=nombre><PARAM=clave>valor</PARAM></function></tool_call>
+ *
+ * y se quedan tan anchos. Comprobado pidiendo una tabla de amortizacion: el
+ * modelo compuso la llamada entera y correcta, con sus sesenta filas, pero
+ * como no venia por el canal que toca no se ejecutaba nada — y al usuario le
+ * llegaban nueve mil caracteres de XML crudo en el chat en lugar de su Excel.
+ *
+ * Interpretarlo aqui deja intacto todo lo de arriba: la llamada sigue el mismo
+ * camino que una normal, se ejecuta, entra en la traza y el turno continua.
+ *
+ * Los valores llegan sin tipar. Los que empiezan por corchete o llave se leen
+ * como JSON (las columnas y las filas vienen asi); el resto se quedan como
+ * cadena, que es lo que declara el esquema para titulos y subtitulos.
+ */
+function rescatarLlamadas(texto: string): { toolCalls: ToolCall[]; resto: string } {
+  if (!texto.includes('<tool_call') && !texto.includes('<function=')) {
+    return { toolCalls: [], resto: texto };
+  }
+
+  const toolCalls: ToolCall[] = [];
+  let resto = texto;
+
+  // El cierre es opcional a proposito: si el modelo se corta a mitad, lo que
+  // haya llegado hasta el final sigue siendo aprovechable.
+  const bloques = /<tool_call>([\s\S]*?)(?:<\/tool_call>|$)/g;
+  for (const bloque of texto.matchAll(bloques)) {
+    const dentro = bloque[1];
+    const nombre = dentro.match(/<function=([^>\s]+)>/)?.[1];
+    if (!nombre) continue;
+
+    const args: Record<string, unknown> = {};
+    const campos = /<parameter=([^>\s]+)>([\s\S]*?)<\/parameter>/g;
+    for (const campo of dentro.matchAll(campos)) {
+      const bruto = campo[2].trim();
+      if (bruto.startsWith('[') || bruto.startsWith('{')) {
+        try {
+          args[campo[1]] = JSON.parse(bruto);
+          continue;
+        } catch {
+          // JSON roto: se guarda tal cual y que la herramienta se queje con
+          // su mensaje de siempre, que es mas util que perder la llamada.
+        }
+      }
+      args[campo[1]] = bruto;
+    }
+
+    if (!Object.keys(args).length) continue;
+    toolCalls.push({
+      id: `call_${randomUUID().slice(0, 8)}`,
+      name: nombre,
+      args: JSON.stringify(args),
+    });
+    resto = resto.replace(bloque[0], '');
+  }
+
+  return { toolCalls, resto: resto.trim() };
 }
 
 function describeUpstreamError(status: number, detail: string, model: string) {
