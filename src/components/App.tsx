@@ -7,7 +7,13 @@ import { Composer } from './Composer';
 import { EffortPicker } from './EffortPicker';
 import { Briefcase, Chevron, Clock, Dots, FileIcon, Folder, Grid, Keyboard, Logout, Menu, NovaMark, Pencil, Pin, Plus, Settings as Gear, Spark, Trash } from './icons';
 import { KeysModal } from './KeysModal';
-import { readConversationsCache, readMessagesCache, writeConversationsCache, writeMessagesCache } from './localCache';
+import {
+  readConversationsCache,
+  readMessagesCache,
+  removeMessagesCache,
+  writeConversationsCache,
+  writeMessagesCache,
+} from './localCache';
 import { KeyboardShortcutsModal } from './KeyboardShortcutsModal';
 import { ArtifactsModal } from './ArtifactsModal';
 import { ProjectView } from './ProjectView';
@@ -129,6 +135,10 @@ export function App({ user }: { user: { id: string; email: string } }) {
     [conversations, user.id],
   );
 
+  // Hasta que no se ha leido una lista (de cache o del servidor) no se escribe
+  // la cache: si no, el primer render, con la lista aun vacia, la borraria.
+  const listaCargadaRef = useRef(false);
+
   useEffect(() => {
     // Optimista: se pinta con lo que quedo en cache del navegador antes de
     // esperar a la red. El caso normal es un solo dispositivo, donde la
@@ -139,6 +149,7 @@ export function App({ user }: { user: { id: string; email: string } }) {
     let openedTarget: string | null = null;
 
     if (cachedConversations?.length) {
+      listaCargadaRef.current = true;
       setConversations(cachedConversations);
       openedTarget = wanted ?? cachedConversations[0]?.id ?? null;
       if (openedTarget) void openConversation(openedTarget, cachedConversations);
@@ -152,6 +163,7 @@ export function App({ user }: { user: { id: string; email: string } }) {
 
       if (convRes.ok) {
         const { conversations } = await convRes.json();
+        listaCargadaRef.current = true;
         setConversations(conversations);
 
         const target = wanted ?? conversations[0]?.id ?? null;
@@ -171,12 +183,58 @@ export function App({ user }: { user: { id: string; email: string } }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /**
+   * Vuelve a leer la lista del servidor y la deja mandar sobre lo que hubiera
+   * en memoria.
+   *
+   * Hace falta porque la aplicacion anclada a la pantalla de inicio no se
+   * recarga: se queda en segundo plano y al volver a ella sigue el mismo React
+   * de hace horas. Sin esto, una conversacion borrada desde el ordenador
+   * seguiria apareciendo en el movil hasta cerrarla del todo.
+   *
+   * Si la que estaba abierta ya no existe, se sale a una nueva en vez de
+   * quedarse mirando un hilo que ya no esta en ninguna parte.
+   */
+  const refrescarLista = useCallback(async () => {
+    const res = await fetch('/api/conversations');
+    if (!res.ok) return;
+
+    const { conversations: frescas } = (await res.json()) as { conversations: Conversation[] };
+    setConversations(frescas);
+
+    if (activeId && !frescas.some((c) => c.id === activeId)) {
+      desiredConversationRef.current = null;
+      setActiveId(null);
+      setMessages([]);
+      removeMessagesCache(user.id, activeId);
+      history.replaceState(null, '', '/');
+    }
+  }, [activeId, user.id]);
+
+  useEffect(() => {
+    // Mientras se esta generando una respuesta no: sacar la conversacion de
+    // debajo a mitad de streaming es peor que enseñar la lista un poco vieja.
+    const alVolver = () => {
+      if (streaming || incognito) return;
+      if (document.visibilityState === 'visible') void refrescarLista();
+    };
+    document.addEventListener('visibilitychange', alVolver);
+    window.addEventListener('focus', alVolver);
+    return () => {
+      document.removeEventListener('visibilitychange', alVolver);
+      window.removeEventListener('focus', alVolver);
+    };
+  }, [refrescarLista, streaming, incognito]);
+
   // Refleja el estado actual en la cache local: cubre tanto la respuesta del
   // servidor como cualquier cambio propio (enviar, reintentar, editar,
   // renombrar, fijar, borrar) sin tener que acordarse de guardar en cada
   // sitio donde eso pasa.
   useEffect(() => {
-    if (conversations.length) writeConversationsCache(user.id, conversations);
+    // Tambien cuando se queda vacia: si solo se guardara con contenido, borrar
+    // la ultima conversacion dejaria la cache con la lista vieja y al abrir la
+    // aplicacion volverian a aparecer un instante las que ya no existen.
+    if (listaCargadaRef.current) writeConversationsCache(user.id, conversations);
   }, [conversations, user.id]);
 
   useEffect(() => {
@@ -323,16 +381,37 @@ export function App({ user }: { user: { id: string; email: string } }) {
     );
   }
 
+  /**
+   * Borra la conversacion de la base de datos —sus mensajes caen con ella por
+   * la clave foranea— y de todo rastro local: la lista, la cache del navegador
+   * y, si era la que estaba abierta, la propia pantalla, que pasa a una
+   * conversacion nueva.
+   *
+   * La lista se actualiza antes de que conteste el servidor, que es lo que hace
+   * que se sienta instantaneo, pero si el borrado falla se devuelve a su sitio
+   * en vez de dejar creer que se borro: al recargar reaparecia y no habia forma
+   * de saber por que.
+   */
   async function removeConversation(id: string) {
     setMenuFor(null);
+
+    const antes = conversations;
     setConversations((prev) => prev.filter((c) => c.id !== id));
+    removeMessagesCache(user.id, id);
+
     if (id === activeId) {
       desiredConversationRef.current = null;
       setActiveId(null);
       setMessages([]);
+      setPending(null);
       history.replaceState(null, '', '/');
     }
-    await fetch(`/api/conversations/${id}`, { method: 'DELETE' });
+
+    const res = await fetch(`/api/conversations/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      setConversations(antes);
+      setError('No se ha podido borrar la conversacion.');
+    }
   }
 
   async function renameConversation(id: string, current: string) {
