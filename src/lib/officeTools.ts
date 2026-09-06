@@ -448,7 +448,7 @@ export function pptxPreviewHtml(
             <span class="cardtop"><span class="badge a${pi % 3}">${String(pi + 1).padStart(2, '0')}</span>${
                   p.etiqueta ? `<span class="pill a${pi % 3}-t a${pi % 3}-b">${escapeHtml(p.etiqueta.toUpperCase())}</span>` : ''
                 }</span>
-            <p class="ptitle">${inlineHtml(p.titulo)}</p>
+            <p class="ptitle">${inlineHtml(sinNumeracion(p.titulo))}</p>
             <p class="ptext">${inlineHtml(p.texto)}</p>
           </div>`,
               )
@@ -693,6 +693,10 @@ export type SlideLayout = 'tarjetas' | 'proceso' | 'comparacion' | 'seccion' | '
  * La plantilla ya antepone el numero de diapositiva, asi que una etiqueta
  * "01 · PROBLEMA" acababa saliendo como "02 · 01 · PROBLEMA". Visto en un
  * pitch generado en produccion: pasaba en cuatro de sus siete diapositivas.
+ *
+ * Lo mismo pasa dentro de las tarjetas: la insignia ya lleva su "01" y el
+ * modelo escribia "1. Auditoria de residuos" en el titulo. Comprobado
+ * convirtiendo un .pptx nuestro a PDF y mirandolo — en el codigo no se ve.
  */
 const sinNumeracion = (label: string) =>
   // El separador es obligatorio y detras de las cifras no puede ir otra:
@@ -1310,7 +1314,7 @@ export async function createPresentation(
           fill: { color: band },
           line: { color: band },
         });
-        s.addText(point.titulo, {
+        s.addText(point.titulo ? sinNumeracion(point.titulo) : "", {
           x: x + 0.2,
           y: top,
           w: cardW - 0.4,
@@ -1527,7 +1531,7 @@ function drawCard(
     // Apilada al lado de un grafico: titulo y texto a la derecha de la insignia.
     const tx = o.x + pad + badge + 0.16;
     const tw = o.w - (pad + badge + 0.16) - pad;
-    s.addText(o.point.titulo, {
+    s.addText(o.point.titulo ? sinNumeracion(o.point.titulo) : "", {
       x: tx,
       y: o.y + pad - 0.04,
       w: tw,
@@ -1592,7 +1596,7 @@ function drawCard(
   }
 
   const titleY = o.y + pad + badge + titleGap;
-  s.addText(o.point.titulo, {
+  s.addText(o.point.titulo ? sinNumeracion(o.point.titulo) : "", {
     x: o.x + pad,
     y: titleY,
     w: o.w - pad * 2,
