@@ -35,8 +35,20 @@ import PptxGenJS from 'pptxgenjs';
 
 export type GeneratedFile = { buffer: Buffer; name: string; mime: string; kind: 'docx' | 'pptx' | 'xlsx' };
 
+/**
+ * Quita la extension que el modelo haya metido en el titulo.
+ *
+ * Visto en produccion: pidio la hoja con nombre "Presupuesto_Reforma_Cocina.xlsx".
+ * Como el saneado se come el punto pero no las letras, quedaba
+ * "Presupuesto_Reforma_Cocinaxlsx.xlsx" en el fichero, y la hoja se llamaba
+ * "Presupuesto_Reforma_Cocina.xls" al recortarla a los 31 caracteres que
+ * admite Excel. El titulo dentro de la hoja tampoco deberia llevarla.
+ */
+export const sinExtension = (title: string) =>
+  title.trim().replace(/\.(xlsx|xls|docx|doc|pptx|ppt|csv)$/i, '').trim();
+
 const safeName = (title: string, ext: string) =>
-  `${(title.trim() || 'documento').replace(/[^\p{L}\p{N} _-]/gu, '').slice(0, 60)}.${ext}`;
+  `${(sinExtension(title) || 'documento').replace(/[^\p{L}\p{N} _-]/gu, '').slice(0, 60)}.${ext}`;
 
 // --- Word --------------------------------------------------------------
 
@@ -1578,13 +1590,13 @@ export async function createSpreadsheet(
   notes?: string[],
 ): Promise<GeneratedFile> {
   const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet(name.trim().slice(0, 30) || 'Hoja1');
+  const sheet = workbook.addWorksheet(sinExtension(name).slice(0, 30) || 'Hoja1');
 
   // Bloque de cabecera de la hoja: titulo, contexto y leyenda. Calcado del
   // .xlsx real de claude.ai — una hoja que llega por correo sin una linea que
   // diga de que va y en que unidades esta obliga a preguntar.
   const titleCell = sheet.getCell('A1');
-  titleCell.value = name;
+  titleCell.value = sinExtension(name);
   titleCell.font = { bold: true, size: 14, color: { argb: `FF${XL_NAVY}` } };
   sheet.getRow(1).height = 18;
 
