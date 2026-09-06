@@ -322,17 +322,34 @@ async function catalogo(): Promise<ModeloCatalogo[]> {
   }
 }
 
+/** Generadores de imagen: no sirven para sostener una conversacion. */
+function esDeImagen(m: ModeloCatalogo): boolean {
+  return /image/i.test(m.name ?? '');
+}
+
 /**
- * Los modelos a los que caer, en orden de ranking.
+ * Los modelos a los que caer, en orden de ranking y en dos escalones.
  *
- * @param conHerramientas cuando el turno lleva herramientas, se descartan los
- *   modelos que no las admiten: contestarian ignorandolas y el archivo que se
- *   pedia no llegaria a crearse nunca.
+ * Con herramientas hay 153 candidatos; sin ellas, 219. Los que no las admiten
+ * no se descartan, se posponen: un modelo que conteste ignorando la
+ * herramienta no creara el archivo que se pedia, pero **a muy malas** es mejor
+ * que no contestar nada. Por eso van detras de todos los que si la admiten, y
+ * solo se llega a ellos cuando los otros 153 han fallado.
+ *
+ * Se quedan fuera los generadores de imagen. Y no se distingue a los modelos
+ * "solo vision": esa marca solo existe en la web del router, detras de sesion;
+ * la API no la expone en ninguna parte (command-a-vision y aya-vision-32b
+ * declaran exactamente los mismos `supported_parameters` que cualquier otro).
+ * Son modelos de chat de todas formas, asi que caen en el segundo escalon.
+ *
+ * @param conHerramientas si el turno lleva herramientas, cambia solo el orden.
  */
 export async function colaDeSuplentes(conHerramientas: boolean): Promise<string[]> {
-  const lista = await catalogo();
-  return lista
-    .filter((m) => m.available !== false && !esAlias(m))
-    .filter((m) => !conHerramientas || (m.supported_parameters ?? []).includes('tools'))
-    .map((m) => m.id);
+  const utiles = (await catalogo()).filter(
+    (m) => m.available !== false && !esAlias(m) && !esDeImagen(m),
+  );
+  if (!conHerramientas) return utiles.map((m) => m.id);
+
+  const admite = (m: ModeloCatalogo) => (m.supported_parameters ?? []).includes('tools');
+  return [...utiles.filter(admite), ...utiles.filter((m) => !admite(m))].map((m) => m.id);
 }
