@@ -1273,7 +1273,6 @@ export function App({ user }: { user: { id: string; email: string } }) {
           incognito={incognito}
           greeting={greeting(user.email)}
           onRetry={retry}
-          onPick={(text) => void send(text)}
           onEdit={editMessage}
           versionSelection={versionSelection}
           onSelectVersion={(replyTo, versionIndex) =>

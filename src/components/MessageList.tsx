@@ -65,13 +65,6 @@ function groupMessages(messages: Message[]): Group[] {
   return groups;
 }
 
-const SUGGESTIONS = [
-  'Explicame la diferencia entre TCP y UDP con un ejemplo real',
-  'Revisa este codigo y dime que romperia en produccion',
-  'Ayudame a estructurar un ensayo sobre un tema polemico',
-  'Traduce y adapta este texto manteniendo el tono',
-];
-
 export function MessageList({
   messages,
   pending,
@@ -83,7 +76,6 @@ export function MessageList({
   incognito,
   greeting,
   onRetry,
-  onPick,
   onEdit,
   versionSelection,
   onSelectVersion,
@@ -98,7 +90,6 @@ export function MessageList({
   incognito?: boolean;
   greeting?: string;
   onRetry: (assistantId?: string) => void;
-  onPick: (text: string) => void;
   onEdit?: (id: string, text: string) => void;
   versionSelection?: Record<string, number>;
   onSelectVersion?: (replyTo: string, versionIndex: number) => void;
@@ -142,13 +133,6 @@ export function MessageList({
               ? 'Conversacion de incognito: no se guardara nada al salir.'
               : 'Escribe algo para empezar.'}
           </p>
-          <div className="suggestions">
-            {SUGGESTIONS.map((s) => (
-              <button key={s} className="suggestion" onClick={() => onPick(s)}>
-                {s}
-              </button>
-            ))}
-          </div>
         </div>
       ) : (
         <div className="thread-inner">

@@ -1213,33 +1213,6 @@ button {
   font-size: 14px;
 }
 
-.suggestions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  width: 100%;
-  max-width: 34rem;
-}
-
-.suggestion {
-  padding: 12px 14px;
-  border: 1.5px solid var(--border);
-  background: var(--surface);
-  text-align: left;
-  font-size: 13.5px;
-  color: var(--text-2);
-  transition: background 0.12s, border-color 0.12s;
-}
-.suggestion {
-  clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px));
-}
-
-.suggestion:hover {
-  background: var(--surface-2);
-  border-color: var(--accent);
-  color: var(--text);
-}
-
 /* --- desplegables y modales ---------------------------------------------- */
 
 .pop {
@@ -1941,10 +1914,6 @@ button {
   .composer-wrap {
     padding-left: 14px;
     padding-right: 14px;
-  }
-
-  .suggestions {
-    grid-template-columns: 1fr;
   }
 
   .msg.user .bubble {
