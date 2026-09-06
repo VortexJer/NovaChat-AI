@@ -2370,3 +2370,181 @@ button {
   justify-content: space-between;
   width: 100%;
 }
+
+/* ==========================================================================
+   Movil
+   ==========================================================================
+
+   La aplicacion se usa desde la pantalla de inicio del iPhone, en modo
+   independiente: sin barra de Safari, a pantalla completa y por debajo de la
+   muesca. Eso cambia tres cosas respecto al escritorio.
+
+   1. No hay raton, asi que **nada puede estar escondido detras de un hover**.
+      En el escritorio los "..." y las acciones de cada mensaje aparecen al
+      pasar por encima para no llenar la pantalla de iconos; en tactil eso los
+      hace invisibles, no discretos.
+   2. Hay zonas que el sistema se queda: la muesca arriba y la barra de inicio
+      abajo. `viewport-fit=cover` deja que el fondo llegue hasta el borde, y
+      aqui se recupera el hueco con `env(safe-area-inset-*)` solo en lo que hay
+      que poder tocar.
+   3. Safari amplia la pagina al enfocar un campo de menos de 16px, y luego se
+      queda ampliada. La cura no es prohibir el zoom —eso rompe la
+      accesibilidad— sino que el redactor mida 16px.
+
+   El escritorio se queda como estaba: todo esto va bajo `hover: none` o bajo
+   anchos de movil.
+*/
+
+/* --- 1. Sin nada escondido detras del raton -------------------------------- */
+
+/* La condicion es doble a proposito: `hover: none` coge el movil de verdad, y
+   el ancho coge tambien la ventana estrecha en el escritorio, donde el hover
+   existe pero la interfaz ya es la de movil. Con una sola de las dos, o no se
+   puede comprobar sin un telefono delante, o se le quita el hover a un raton
+   que si esta. */
+@media (hover: none), (max-width: 860px) {
+  /* Los "..." de conversaciones, proyectos y sus hilos, y las acciones de cada
+     mensaje, siempre visibles. Se dejan a media tinta para que sigan siendo
+     secundarios, pero se ven y se pueden tocar. */
+  .conv-menu,
+  .side-sub .conv-menu,
+  .side-nav-item .conv-menu,
+  .msg-actions,
+  .table-bar {
+    opacity: 1;
+  }
+
+  .conv-menu,
+  .side-sub .conv-menu,
+  .side-nav-item .conv-menu {
+    color: var(--text-3);
+  }
+
+  /* Un dedo no acierta en 24 px. Lo que se toca crece, sin mover el texto de
+     al lado: el area util es mayor que el icono. */
+  .conv-menu,
+  .side-sub .conv-menu,
+  .side-nav-item .conv-menu {
+    width: 34px;
+    height: 34px;
+    margin: -5px 0;
+  }
+
+  .act,
+  .pop-item,
+  .side-action,
+  .icon-btn {
+    min-height: 40px;
+  }
+
+  .msg-actions .act {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  /* El menu que se abre pegado al borde derecho de la barra lateral se salia
+     de la pantalla. */
+  .pop {
+    max-width: calc(100vw - 24px);
+  }
+
+  .conv.active,
+  .side-nav-item.on,
+  .side-sub.on {
+    background: var(--surface);
+  }
+}
+
+/* El resaltado de "encima" solo se quita donde de verdad no hay raton: en
+   tactil se queda pegado tras tocar y hace creer que algo sigue activo. */
+@media (hover: none) {
+  .conv:hover,
+  .side-nav-item:hover,
+  .side-sub:hover {
+    background: none;
+  }
+}
+
+/* El destello azul de Safari al tocar, fuera: cada control ya tiene su propio
+   estado. Y `manipulation` quita el retardo de 300 ms del doble toque. */
+button,
+a,
+[role='button'],
+label,
+summary {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* --- 2. Zonas seguras y alto real ------------------------------------------ */
+
+html {
+  /* Sin esto, el rebote de Safari despega toda la aplicacion del borde al
+     llegar al final de una lista. */
+  overscroll-behavior: none;
+}
+
+body {
+  overscroll-behavior: none;
+}
+
+@media (max-width: 860px) {
+  .topbar {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .sidebar {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .composer-wrap {
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+
+  .artifact {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Los modales, a pantalla completa: en 390 px de ancho una ventana centrada
+     con margenes no deja sitio para nada. */
+  .backdrop {
+    padding: 0;
+  }
+
+  .modal {
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    max-height: none;
+    border-radius: 0;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Y los que tienen dos columnas (el catalogo de skills usa `.proj-split`, y
+     la portada del proyecto su propia rejilla) se apilan. */
+  .proj-split,
+  .project-view {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .art-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+}
+
+/* --- 3. Que Safari no amplie al escribir ----------------------------------- */
+
+@media (max-width: 860px) {
+  .composer textarea,
+  .input,
+  .textarea,
+  input[type='text'],
+  input[type='email'],
+  input[type='password'],
+  input[type='search'] {
+    font-size: 16px;
+  }
+}

@@ -27,16 +27,46 @@ export const metadata: Metadata = {
   description: 'Cliente de chat privado.',
   // Sin indexar: es una instalacion personal, no un sitio publico.
   robots: { index: false, follow: false },
-  icons: { icon: '/icon.svg', apple: '/icon.svg' },
+  manifest: '/manifest.webmanifest',
+  applicationName: 'NovaChat',
+
+  // Anadida a la pantalla de inicio del iPhone, la aplicacion abre a pantalla
+  // completa y sin barra de Safari. `title` es lo que se lee debajo del icono:
+  // sin esto iOS pone el <title> entero de la pagina, que cambia con cada
+  // conversacion. La barra de estado translucida deja que el fondo de la
+  // aplicacion suba hasta arriba del todo, y por eso hace falta respetar las
+  // zonas seguras en el CSS.
+  appleWebApp: {
+    capable: true,
+    title: 'NovaChat',
+    statusBarStyle: 'black-translucent',
+  },
+
+  // iOS no acepta SVG en el icono de la pantalla de inicio: sin el PNG pone una
+  // miniatura de la pagina. Se generan con `node scripts/iconos.mjs`.
+  icons: {
+    icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
+      { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+    ],
+    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
+  },
+
+  formatDetection: { telephone: false },
 };
 
 export const viewport: Viewport = {
   themeColor: '#0b0c0e',
   // El navegador movil no debe hacer zoom al enfocar el redactor, pero el
   // usuario si puede ampliar a mano: bloquearlo del todo rompe accesibilidad.
+  // (El zoom al enfocar se evita con 16px de fuente en el redactor, no
+  // prohibiendolo.)
   width: 'device-width',
   initialScale: 1,
   maximumScale: 5,
+  // Que la pagina llegue hasta debajo de la muesca y del indicador de inicio;
+  // el hueco se recupera con `env(safe-area-inset-*)` donde hace falta.
+  viewportFit: 'cover',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
