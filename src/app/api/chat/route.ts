@@ -572,9 +572,11 @@ async function runRound(
     // Lo ha parado el usuario, no el vigilante: no se le busca sustituto.
     if (opts.signal.aborted) return r;
 
-    if (r.mudo) todosCapados = false;
     ultimoError = r.error;
+    // Solo cuentan los suplentes. Que el primero se quede mudo es la condicion
+    // para llegar hasta aqui, no una senal de que quede alguien libre.
     if (model !== opts.model) {
+      if (!r.agotado) todosCapados = false;
       console.warn(`[novachat] ${model} sin respuesta (${r.agotado ? '429' : 'mudo'}), siguiente`);
     }
   }
