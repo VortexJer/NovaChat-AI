@@ -363,9 +363,30 @@ export async function POST(req: Request) {
             const loadedDocSkill = trace.some(
               (step) => step.name === 'usar_skill' && DOC_SKILLS.has(String(step.args?.nombre ?? '')),
             );
+            /**
+             * Una respuesta que **es** codigo ya es la entrega.
+             *
+             * Pidiendo "hazme una pagina HTML con una calculadora de
+             * propinas", la respuesta pasaba de LONG_ANSWER y no habia creado
+             * ningun archivo, asi que se forzaba una herramienta — y el modelo
+             * elegia crear_documento_word y devolvia un .docx con el HTML
+             * dentro. Absurdo: lo que se pedia era la pagina, y la pagina ya
+             * estaba escrita.
+             *
+             * Se mide por peso, no por presencia: una respuesta normal puede
+             * llevar un ejemplo corto entre vallas sin dejar de ser una
+             * respuesta a la que si le falta su archivo.
+             */
+            const enBloques = [...result.text.matchAll(/```[\s\S]*?```/g)].reduce(
+              (n, m) => n + m[0].length,
+              0,
+            );
+            const esSobreTodoCodigo = enBloques > result.text.trim().length * 0.5;
+
             const maybeOwesFile =
               forced < 2 &&
               tools.length > 0 &&
+              !esSobreTodoCodigo &&
               (loadedDocSkill || result.text.trim().length >= LONG_ANSWER) &&
               !trace.some((step) => step.name.startsWith('crear_'));
 
