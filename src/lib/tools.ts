@@ -329,7 +329,7 @@ const CREATE_XLSX: ToolSpec = {
         notas: {
           type: 'array',
           description:
-            'Opcional. Notas y supuestos que van al pie de la hoja: de donde salen las cifras, como se calcula cada columna derivada, y como ampliar la tabla sin romper las formulas.',
+            'Opcional. Notas y supuestos que van al pie de la hoja: de donde salen las cifras, como se calcula cada columna derivada, y como ampliar la tabla sin romper las formulas. No cites coordenadas de celda aqui (nada de "D8*0.10" ni "SUM(D2:D7)"): la hoja lleva delante un bloque de titulo, asi que las filas no caen donde las escribes y las notas acabarian contradiciendo a la propia tabla. Describe el calculo en palabras: "imprevistos: 10% sobre el subtotal de partidas".',
           items: { type: 'string' },
         },
       },
