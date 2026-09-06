@@ -291,7 +291,9 @@ const CREATE_XLSX: ToolSpec = {
   function: {
     name: 'crear_hoja_calculo',
     description:
-      'Crea una hoja de calculo de Excel (.xlsx) descargable: bloque de titulo, cabecera en azul marino, formato numerico por columna, formulas de verdad (Excel las recalcula al abrir), celdas de entrada resaltadas en amarillo frente a las calculadas, fila de totales destacada y paneles congelados. Si no has leido ya la skill "xlsx" en esta conversacion, carga primero sus instrucciones con usar_skill antes de llamar a esta herramienta.',
+      'Crea una hoja de calculo de Excel (.xlsx) descargable: bloque de titulo, cabecera en azul marino, formato numerico por columna, formulas de verdad (Excel las recalcula al abrir), celdas de entrada resaltadas en amarillo frente a las calculadas, fila de totales destacada y paneles congelados. ' +
+      'Tres cosas obligatorias: (1) cada fila tiene exactamente un valor por columna, en el mismo orden — si llevas numero de partida o columna de total, declaralos en "columnas"; (2) todo valor que sea el resultado de calcular otros de la hoja va como formula, no como numero ya calculado; (3) si hay importes, la ultima fila empieza por "Total" y sus celdas son formulas. ' +
+      'Si no has leido ya la skill "xlsx" en esta conversacion, carga primero sus instrucciones con usar_skill antes de llamar a esta herramienta.',
     parameters: {
       type: 'object',
       properties: {
@@ -880,6 +882,28 @@ async function makeXlsx(
   notas?: string[],
 ): Promise<ToolResult> {
   if (columnas.length === 0) return { forModel: 'No se ha dado ninguna columna.' };
+
+  // Una fila con mas valores que columnas no es un detalle: **descoloca la
+  // tabla entera**. Visto en produccion pidiendo un presupuesto — el modelo
+  // mando cinco valores por fila (nº, partida, cantidad, precio, total) contra
+  // una cabecera de cuatro, y salio un archivo donde la columna "Total" tenia
+  // el precio unitario y los formatos de moneda caian sobre el texto. Antes
+  // esto se guardaba sin rechistar. Ahora se devuelve el error explicando la
+  // cuenta exacta, que es lo que permite corregirlo en el mismo turno.
+  const descuadrada = filas.findIndex((f) => f.length > columnas.length);
+  if (descuadrada >= 0) {
+    const fila = filas[descuadrada];
+    return {
+      forModel:
+        `La tabla no cuadra: has dado ${columnas.length} columnas (${columnas
+          .map((c) => c.nombre)
+          .join(', ')}) pero la fila ${descuadrada + 1} trae ${fila.length} valores. ` +
+        `Cada fila tiene que tener un valor por columna y en el mismo orden. ` +
+        `Vuelve a llamar a la herramienta con las columnas que de verdad necesitas ` +
+        `(si llevas numero de partida o columna de total, decláralos tambien en "columnas").`,
+    };
+  }
+
   const file = await createSpreadsheet(nombre, columnas, filas, subtitulo, notas);
   const fileId = await keep(ctx, file, xlsxPreviewHtml(nombre, columnas, filas, subtitulo, notas));
   return {

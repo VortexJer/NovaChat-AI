@@ -466,7 +466,7 @@ export async function POST(req: Request) {
  * fragmentos se van entregando por los callbacks segun llegan, para que el
  * usuario vea escribir en vez de esperar al final.
  */
-async function runRound(opts: {
+type RoundOpts = {
   model: string;
   messages: ChatMessage[];
   temperature: number;
@@ -477,7 +477,89 @@ async function runRound(opts: {
   forceTool?: boolean;
   onDelta: (v: string) => void;
   onReasoning: (v: string) => void;
-}): Promise<{ text: string; toolCalls: ToolCall[]; error?: string }> {
+};
+
+/**
+ * Cuanto se espera a la primera palabra antes de dar el intento por perdido.
+ *
+ * Medido contra este router: lo normal son entre seis y catorce segundos hasta
+ * el primer caracter. Pero unas cuantas veces al dia el modelo gratuito que le
+ * toca acepta la peticion y **no emite nada nunca**: se han visto esperas de
+ * dos minutos terminando en nada. Como el router elige modelo en cada peticion,
+ * volver a pedir suele caer en otro que si contesta.
+ *
+ * Treinta segundos deja pasar holgadamente el caso lento de verdad y corta el
+ * caso muerto mucho antes de que se note como "esto no va".
+ */
+const SIN_PRIMERA_PALABRA_MS = 30_000;
+
+/**
+ * Una vuelta de conversacion, reintentando si el modelo se queda mudo.
+ *
+ * Solo se reintenta cuando **no ha llegado nada**: si ya habia empezado a
+ * escribir, cortar a mitad y volver a empezar seria peor que la pausa.
+ */
+async function runRound(
+  opts: RoundOpts,
+): Promise<{ text: string; toolCalls: ToolCall[]; error?: string }> {
+  for (let intento = 0; intento < 2; intento++) {
+    const r = await unIntento(opts);
+    if (!r.mudo) return r;
+    if (opts.signal.aborted) return r; // lo ha parado el usuario, no el vigilante
+  }
+  return {
+    text: '',
+    toolCalls: [],
+    error: 'El modelo no ha empezado a responder en dos intentos. Vuelve a intentarlo.',
+  };
+}
+
+async function unIntento(
+  opts: RoundOpts,
+): Promise<{ text: string; toolCalls: ToolCall[]; error?: string; mudo?: boolean }> {
+  // Vigilante propio: se aborta la peticion al router sin tocar la del usuario,
+  // para poder distinguir despues quien corto.
+  const vigilante = new AbortController();
+  const cortarTodo = () => vigilante.abort();
+  opts.signal.addEventListener('abort', cortarTodo);
+
+  let huboContenido = false;
+  const reloj = setTimeout(() => {
+    if (!huboContenido) vigilante.abort();
+  }, SIN_PRIMERA_PALABRA_MS);
+
+  // Tope duro, que antes lo ponia `streamCompletion` con su propio timeout y
+  // ahora se le pasa nuestra señal: una respuesta que empieza y no termina
+  // nunca tambien tiene que cortarse.
+  const tope = setTimeout(() => vigilante.abort(), 180_000);
+
+  try {
+    return await unIntentoInterno(opts, vigilante.signal, () => {
+      if (!huboContenido) {
+        huboContenido = true;
+        clearTimeout(reloj);
+      }
+    });
+  } catch (err) {
+    const abortado = (err as Error)?.name === 'AbortError';
+    // Si aborto el vigilante y no habia llegado nada, se puede reintentar.
+    if (abortado && !huboContenido && !opts.signal.aborted) {
+      return { text: '', toolCalls: [], mudo: true };
+    }
+    if (abortado) return { text: '', toolCalls: [] };
+    throw err;
+  } finally {
+    clearTimeout(reloj);
+    clearTimeout(tope);
+    opts.signal.removeEventListener('abort', cortarTodo);
+  }
+}
+
+async function unIntentoInterno(
+  opts: RoundOpts,
+  signal: AbortSignal,
+  marcarContenido: () => void,
+): Promise<{ text: string; toolCalls: ToolCall[]; error?: string }> {
   let upstream = await streamCompletion(
     {
       model: opts.model,
@@ -488,7 +570,7 @@ async function runRound(opts: {
         ? { tools: opts.tools, tool_choice: opts.forceTool ? 'required' : 'auto' }
         : {}),
     },
-    opts.signal,
+    signal,
   );
 
   // No todos los modelos del router admiten herramientas, y el que no las
@@ -502,7 +584,7 @@ async function runRound(opts: {
         temperature: opts.temperature,
         reasoning_effort: opts.reasoningEffort,
       },
-      opts.signal,
+      signal,
     );
   }
 
@@ -545,14 +627,19 @@ async function runRound(opts: {
         // Los modelos de razonamiento mandan la cadena de pensamiento en un
         // campo aparte, y no hay un nombre unico entre proveedores.
         const think = delta.reasoning_content ?? delta.reasoning;
-        if (typeof think === 'string' && think) opts.onReasoning(think);
+        if (typeof think === 'string' && think) {
+          marcarContenido();
+          opts.onReasoning(think);
+        }
 
         if (typeof delta.content === 'string' && delta.content) {
+          marcarContenido();
           text += delta.content;
           opts.onDelta(delta.content);
         }
 
         for (const tc of delta.tool_calls ?? []) {
+          marcarContenido();
           const index = tc.index ?? 0;
           const current = calls.get(index) ?? { id: '', name: '', args: '' };
           if (tc.id) current.id = tc.id;
