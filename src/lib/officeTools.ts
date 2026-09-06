@@ -353,7 +353,7 @@ export function pptxPreviewHtml(
   slides: SlideSpec[],
   theme?: Partial<PptxTheme>,
 ): string {
-  const t = paletteFrom(theme);
+  const t = paletteFrom(theme, title);
   const sections = slides.map((s) => s.seccion).filter((x): x is string => Boolean(x));
   const chips =
     sections.length >= 2
@@ -780,6 +780,48 @@ const DEFAULT_THEME: PptxTheme = {
   titulares: 'serif',
 };
 
+/**
+ * Barajas de repuesto para cuando el modelo no elige aspecto.
+ *
+ * La herramienta ya acepta un `tema`, pero los modelos pequenos del router
+ * casi nunca lo rellenan, asi que todas las presentaciones caian en el mismo
+ * DEFAULT_THEME: el mismo morado, la misma portada de circulos, siempre. Con
+ * dos barajas seguidas delante se nota, y se nota que es una plantilla.
+ *
+ * Mirando como lo hace claude.ai, alli no hay plantilla: escribe un script de
+ * pptxgenjs distinto para cada baraja, lo renderiza, mira cada diapositiva y
+ * corrige el espaciado. Eso aqui no se puede replicar tal cual — habria que
+ * ejecutar codigo que escribe el modelo—, pero si se puede quitar lo que de
+ * verdad cansa, que es que dos presentaciones seguidas sean identicas.
+ *
+ * Las combinaciones estan elegidas a mano, no generadas al azar: cada fondo es
+ * oscuro de verdad y sus acentos contrastan sobre el, que es de lo que depende
+ * que se lea proyectado.
+ */
+const PALETAS: PptxTheme[] = [
+  DEFAULT_THEME,
+  { fondo: '10243A', acentos: ['2E9CCA', 'F2A65A', '8CC5A3'], portada: 'diagonal', titulares: 'sans' },
+  { fondo: '1F2421', acentos: ['79B473', 'E4B363', 'C2847A'], portada: 'arco', titulares: 'serif' },
+  { fondo: '2B1B2E', acentos: ['D96C9E', 'F2C14E', '6FA8A0'], portada: 'lineas', titulares: 'sans' },
+  { fondo: '0E1B2B', acentos: ['E0575B', '4FB3A6', 'EBC15C'], portada: 'limpia', titulares: 'serif' },
+  { fondo: '2A1E14', acentos: ['D98E48', '6E9887', 'C9A227'], portada: 'circulos', titulares: 'sans' },
+  { fondo: '141B34', acentos: ['7C6BF2', '4CC2A8', 'F28F6B'], portada: 'diagonal', titulares: 'serif' },
+  { fondo: '20262E', acentos: ['5AA9E6', 'F49D6E', 'A0CE83'], portada: 'arco', titulares: 'sans' },
+];
+
+/**
+ * Baraja de repuesto para un titulo dado.
+ *
+ * Se elige por el titulo y no al azar para que sea estable: regenerar la misma
+ * presentacion da el mismo aspecto, y dos presentaciones distintas casi nunca
+ * caen en la misma.
+ */
+function paletaPara(titulo: string): PptxTheme {
+  let h = 0;
+  for (let i = 0; i < titulo.length; i++) h = (h * 31 + titulo.charCodeAt(i)) >>> 0;
+  return PALETAS[h % PALETAS.length];
+}
+
 const HEX = /^[0-9A-Fa-f]{6}$/;
 const hex = (v: string | undefined, fallback: string) =>
   typeof v === 'string' && HEX.test(v.replace('#', '')) ? v.replace('#', '').toUpperCase() : fallback;
@@ -802,8 +844,9 @@ function mix(h: string, t: number): string {
   return parts.map((c) => c.toString(16).padStart(2, '0')).join('').toUpperCase();
 }
 
-function paletteFrom(theme?: Partial<PptxTheme>): Palette {
-  let ink = hex(theme?.fondo, DEFAULT_THEME.fondo);
+function paletteFrom(theme?: Partial<PptxTheme>, titulo = ''): Palette {
+  const base = paletaPara(titulo);
+  let ink = hex(theme?.fondo, base.fondo);
   // Un "fondo" claro romperia la portada entera: se oscurece en vez de
   // rechazarlo, que da mejor resultado que ignorar lo que pidio el modelo.
   if (luminance(ink) > 0.35) ink = mix(ink, -0.72);
@@ -812,9 +855,9 @@ function paletteFrom(theme?: Partial<PptxTheme>): Palette {
     .map((a) => hex(a, ''))
     .filter(Boolean)
     .slice(0, 3);
-  const finalAccents = accents.length ? accents : DEFAULT_THEME.acentos;
+  const finalAccents = accents.length ? accents : base.acentos;
 
-  const serif = theme?.titulares === 'sans' ? 'Calibri' : 'Georgia';
+  const serif = (theme?.titulares ?? base.titulares) === 'sans' ? 'Calibri' : 'Georgia';
 
   return {
     ink,
@@ -830,7 +873,7 @@ function paletteFrom(theme?: Partial<PptxTheme>): Palette {
     muted: '6B6B78',
     serif,
     sans: 'Calibri',
-    cover: theme?.portada ?? DEFAULT_THEME.portada,
+    cover: theme?.portada ?? base.portada,
   };
 }
 
@@ -848,7 +891,7 @@ export async function createPresentation(
   slides: SlideSpec[],
   theme?: Partial<PptxTheme>,
 ): Promise<GeneratedFile> {
-  const t = paletteFrom(theme);
+  const t = paletteFrom(theme, title);
   const pptx = new PptxGenJS();
   pptx.defineLayout({ name: 'NOVA_16x9', width: SLIDE_W, height: SLIDE_H });
   pptx.layout = 'NOVA_16x9';

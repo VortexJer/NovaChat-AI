@@ -176,7 +176,7 @@ const CREATE_PPTX: ToolSpec = {
         tema: {
           type: 'object',
           description:
-            'El aspecto de la presentacion. Elige colores que salgan del tema del que va, no de la categoria: una tostadora de cafe no tiene por que ser marron ni una empresa de salud azul corporativo. Es lo que separa una baraja diseñada de una plantilla rellenada.',
+            'El aspecto de la presentacion. Rellenalo SIEMPRE: si lo omites se usa una baraja de repuesto, que sirve pero no sabe de que va tu presentacion. Elige colores que salgan del tema del que va, no de la categoria: una tostadora de cafe no tiene por que ser marron ni una empresa de salud azul corporativo. El fondo, oscuro de verdad, para que se lea proyectado; dos o tres acentos que contrasten sobre el. Varia tambien portada y titulares entre presentaciones: es lo que separa una baraja diseñada de una plantilla rellenada.',
           properties: {
             fondo: {
               type: 'string',
