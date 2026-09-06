@@ -377,7 +377,7 @@ export function pptxPreviewHtml(
 
   const rest = slides
     .map((s, i) => {
-      const label = s.seccion ? escapeHtml(s.seccion.toUpperCase()) : '';
+      const label = s.seccion ? escapeHtml(sinNumeracion(s.seccion).toUpperCase()) : '';
       const eyebrow = `${String(i + 1).padStart(2, '0')}${label ? ` · ${label}` : ''}`;
       const accent = `a${i % 3}`;
 
@@ -687,6 +687,19 @@ export type SlideChart = { titulo: string; categorias: string[]; valores: number
  */
 export type SlideLayout = 'tarjetas' | 'proceso' | 'comparacion' | 'seccion' | 'cita';
 
+/**
+ * Quita la numeracion que el modelo haya puesto en la etiqueta de seccion.
+ *
+ * La plantilla ya antepone el numero de diapositiva, asi que una etiqueta
+ * "01 · PROBLEMA" acababa saliendo como "02 · 01 · PROBLEMA". Visto en un
+ * pitch generado en produccion: pasaba en cuatro de sus siete diapositivas.
+ */
+const sinNumeracion = (label: string) =>
+  // El separador es obligatorio y detras de las cifras no puede ir otra:
+  // sin eso, "5G y conectividad" perdia el 5 y "2026 Resultados" se quedaba
+  // en "26 Resultados". Comprobado con esos dos casos.
+  label.replace(/^\s*\d{1,2}(?!\d)\s*[.)·:\-–—]\s*/, '').trim() || label.trim();
+
 export type SlideSpec = {
   /** Etiqueta corta de seccion ("INTRODUCCION"). Si falta, no se muestra numero de seccion. */
   seccion?: string;
@@ -943,7 +956,8 @@ export async function createPresentation(
   slides.forEach((slide, index) => {
     const s = pptx.addSlide();
     const sectionLabel = slide.seccion ? slide.seccion.toUpperCase() : '';
-    const eyebrow = `${String(index + 1).padStart(2, '0')}${sectionLabel ? ` · ${sectionLabel}` : ''}`;
+    const limpia = sectionLabel ? sinNumeracion(sectionLabel) : '';
+    const eyebrow = `${String(index + 1).padStart(2, '0')}${limpia ? ` · ${limpia}` : ''}`;
     const accent = t.accents[index % t.accents.length];
 
     // --- Separador de seccion: solo el numero y el nombre, en oscuro -------

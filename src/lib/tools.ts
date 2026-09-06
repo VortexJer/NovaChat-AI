@@ -207,7 +207,7 @@ const CREATE_PPTX: ToolSpec = {
             properties: {
               seccion: {
                 type: 'string',
-                description: 'Etiqueta corta de seccion, p. ej. "Introduccion" — aparece como "01 · INTRODUCCION" encima del titulo. Opcional.',
+                description: 'Etiqueta corta de seccion, p. ej. "Introduccion" — aparece como "01 · INTRODUCCION" encima del titulo. No la numeres tu: el numero lo pone la plantilla. Opcional.',
               },
               titulo: { type: 'string', description: 'Titulo de la diapositiva.' },
               puntos: {
