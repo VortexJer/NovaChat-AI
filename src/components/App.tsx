@@ -41,6 +41,16 @@ export function App({ user }: { user: { id: string; email: string } }) {
 
   const [streaming, setStreaming] = useState(false);
   const [pending, setPending] = useState<Message | null>(null);
+  /**
+   * De que conversacion es la respuesta que se esta generando.
+   *
+   * Sin esto, abrir otro chat mientras uno responde pintaba la burbuja en
+   * curso — y todos sus trozos — en el chat recien abierto, y al terminar
+   * pegaba la respuesta entera en el hilo equivocado. El estado de generacion
+   * es uno solo para toda la aplicacion, asi que hay que decir a quien
+   * pertenece y no ensenarlo fuera de ahi.
+   */
+  const [pendingFor, setPendingFor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [slow, setSlow] = useState(false);
   // Que version de cada respuesta se esta mostrando, por id del mensaje de
@@ -500,6 +510,7 @@ export function App({ user }: { user: { id: string; email: string } }) {
         setMessages([...base, userMessage]);
       }
       setPending({ id: 'streaming', role: 'assistant', content: '', reasoning: '', model, trace: [] });
+      setPendingFor(conversationId ?? null);
       setPendingStartedAt(Date.now());
 
       // Vigilante de silencios.
@@ -778,7 +789,12 @@ export function App({ user }: { user: { id: string; email: string } }) {
         abortRef.current = null;
 
         setPending(null);
-        if (finalText || finalReasoning || finalTrace.length) {
+        setPendingFor(null);
+        // Si mientras tanto se ha abierto otro chat, esta respuesta no se
+        // pega a lo que hay en pantalla: pertenece a otro hilo y ya esta
+        // guardada en la base de datos, asi que aparecera al volver a el.
+        const sigueDelante = !conversationId || desiredConversationRef.current === conversationId;
+        if (sigueDelante && (finalText || finalReasoning || finalTrace.length)) {
           setMessages((prev) => [
             ...prev,
             {
@@ -961,6 +977,14 @@ export function App({ user }: { user: { id: string; email: string } }) {
   // respuesta de verdad busco algo, no siempre.
   const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
   const lastUsedWebSearch = Boolean(lastAssistant?.trace?.some((s) => s.name === 'buscar_web'));
+
+  /**
+   * Si la respuesta en curso es de la conversacion que se esta viendo.
+   *
+   * En incognito no hay id de conversacion y `pendingFor` se queda en null:
+   * ahi solo existe un hilo, asi que se ensena igual.
+   */
+  const mio = pendingFor === null || pendingFor === activeId;
 
   return (
     <div
@@ -1361,13 +1385,18 @@ export function App({ user }: { user: { id: string; email: string } }) {
           />
         ) : (
           <>
+        {/*
+          Todo lo que indica "esto se esta generando" se ensena solo en la
+          conversacion a la que pertenece. Al abrir otra mientras responde,
+          este hilo se ve quieto y el de origen conserva su burbuja.
+        */}
         <MessageList
           messages={messages}
-          pending={pending}
-          streaming={streaming}
-          slow={slow}
-          toolRunning={toolRunning}
-          pendingStartedAt={pendingStartedAt}
+          pending={mio ? pending : null}
+          streaming={mio && streaming}
+          slow={mio && slow}
+          toolRunning={mio ? toolRunning : null}
+          pendingStartedAt={mio ? pendingStartedAt : null}
           error={error}
           incognito={incognito}
           greeting={greeting(user.email)}
