@@ -53,6 +53,12 @@ export const metadata: Metadata = {
   },
 
   formatDetection: { telephone: false },
+
+  // Next solo emite el nombre moderno (`mobile-web-app-capable`), y Safari lee
+  // el suyo de siempre para decidir si abre a pantalla completa: sin esta
+  // linea, "Añadir a inicio" abre con la barra de Safari encima, que es
+  // justamente lo que no queriamos.
+  other: { 'apple-mobile-web-app-capable': 'yes' },
 };
 
 export const viewport: Viewport = {
