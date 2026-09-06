@@ -510,14 +510,28 @@ export function App({ user }: { user: { id: string; email: string } }) {
       // se hubiera colgado. El reloj se rearma con cada trozo que llega, asi
       // que el aviso sale tanto al principio como en un silencio de despues.
       let slowTimer: ReturnType<typeof setTimeout> | undefined;
-      const watchSilence = () => {
-        clearTimeout(slowTimer);
-        slowTimer = setTimeout(() => setSlow(true), 6000);
-      };
-      watchSilence();
-
+      let deadTimer: ReturnType<typeof setTimeout> | undefined;
       const controller = new AbortController();
       abortRef.current = controller;
+
+      const watchSilence = () => {
+        clearTimeout(slowTimer);
+        clearTimeout(deadTimer);
+        slowTimer = setTimeout(() => setSlow(true), 6000);
+        // Y una red debajo del aviso: si pasan dos minutos sin que llegue
+        // **nada**, se da el turno por muerto y se corta.
+        //
+        // El servidor tiene sus propios topes, pero si se queda colgado por
+        // cualquier motivo —una consulta que no vuelve, una conexion que no se
+        // cierra— el cliente se queda esperando para siempre con la luz
+        // parpadeando y sin forma de saber que ya no va a llegar nada. Esto se
+        // encarga de que eso siempre acabe.
+        deadTimer = setTimeout(() => {
+          setError('El servidor ha dejado de responder. Lo que se habia generado esta guardado.');
+          controller.abort();
+        }, 120_000);
+      };
+      watchSilence();
       let doneMeta: { id: string; reply_to?: string | null; version_index?: number } | null = null;
       let abortado = false;
 
@@ -757,6 +771,7 @@ export function App({ user }: { user: { id: string; email: string } }) {
       } finally {
         await settleText(abortado);
         clearTimeout(slowTimer);
+        clearTimeout(deadTimer);
         setSlow(false);
         setToolRunning(null);
         setPendingStartedAt(null);

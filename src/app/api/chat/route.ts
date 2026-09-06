@@ -271,6 +271,22 @@ export async function POST(req: Request) {
       // reintento posterior pueda referenciarlo por su id de verdad.
       if (!incognito && mode === 'send') send({ t: 'user', id: userMessageId });
 
+      /**
+       * El titulo se pide **a la vez** que la respuesta, no despues.
+       *
+       * Antes se generaba al terminar, y como es otra llamada al router, el
+       * `done` y el cierre del stream esperaban a que volviera: con el router
+       * lento eso son hasta sesenta segundos en los que la respuesta ya estaba
+       * entera en pantalla y la aplicacion seguia diciendo que generaba. Es el
+       * "se queda atascado con la luz parpadeando" de siempre.
+       *
+       * Lanzandolo aqui, para cuando la respuesta acaba casi siempre ya esta
+       * listo. El `catch` es obligatorio: una promesa que nadie espera todavia
+       * y que falla tumbaria el proceso.
+       */
+      const tituloPendiente =
+        !incognito && isFirstExchange ? makeTitle(content).catch(() => null) : null;
+
       // Si el usuario cierra la pestana o pulsa "detener", se corta la peticion
       // al router en vez de seguir gastando tokens contra el vacio. Lo generado
       // hasta ese punto se guarda igual, mas abajo.
@@ -429,8 +445,15 @@ export async function POST(req: Request) {
         await sql`UPDATE conversations SET updated_at = now() WHERE id = ${conversationId}`;
       }
 
-      if (!incognito && isFirstExchange) {
-        const title = await makeTitle(content);
+      if (tituloPendiente) {
+        // Y aun asi, con tope: si el titulo no esta a los tres segundos, se
+        // cierra sin el. La conversacion se queda como "Nueva conversacion",
+        // que es infinitamente mejor que dejar la interfaz creyendo que aun
+        // esta escribiendo.
+        const title = await Promise.race([
+          tituloPendiente,
+          new Promise<null>((r) => setTimeout(() => r(null), 3000)),
+        ]);
         if (title) {
           await sql`UPDATE conversations SET title = ${title} WHERE id = ${conversationId}`;
           send({ t: 'title', v: title });
