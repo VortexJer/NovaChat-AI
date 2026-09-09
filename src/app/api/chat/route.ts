@@ -623,7 +623,7 @@ async function runRound(
 ): Promise<{ text: string; toolCalls: ToolCall[]; error?: string }> {
   // El elegido, con la paciencia normal.
   const primero = await unIntento(opts);
-  if (!primero.mudo && !primero.agotado) return primero;
+  if (!primero.mudo && !primero.agotado && !primero.reintentable) return primero;
   if (opts.signal.aborted) return primero;
 
   let ultimoError = primero.error;
@@ -647,7 +647,7 @@ async function runRound(
     const r = await unIntento({ ...opts, model }, PACIENCIA_SUPLENTE_MS);
     probados++;
 
-    if (!r.mudo && !r.agotado) {
+    if (!r.mudo && !r.agotado && !r.reintentable) {
       console.warn(`[novachat] responde ${model} tras ${probados} intentos`);
       return r;
     }
@@ -688,7 +688,7 @@ async function runRound(
 async function unIntento(
   opts: RoundOpts,
   paciencia = SIN_PRIMERA_PALABRA_MS,
-): Promise<{ text: string; toolCalls: ToolCall[]; error?: string; mudo?: boolean; agotado?: boolean }> {
+): Promise<{ text: string; toolCalls: ToolCall[]; error?: string; mudo?: boolean; agotado?: boolean; reintentable?: boolean }> {
   // Vigilante propio: se aborta la peticion al router sin tocar la del usuario,
   // para poder distinguir despues quien corto.
   const vigilante = new AbortController();
@@ -731,7 +731,7 @@ async function unIntentoInterno(
   opts: RoundOpts,
   signal: AbortSignal,
   marcarContenido: () => void,
-): Promise<{ text: string; toolCalls: ToolCall[]; error?: string; agotado?: boolean }> {
+): Promise<{ text: string; toolCalls: ToolCall[]; error?: string; agotado?: boolean; reintentable?: boolean }> {
   let upstream = await streamCompletion(
     {
       model: opts.model,
@@ -780,6 +780,7 @@ async function unIntentoInterno(
       // 429 es el enfriamiento por modelo del router. No es el final del
       // camino: hay otros modelos y puede que alguno este libre.
       agotado: upstream.status === 429,
+      reintentable: mereceOtroModelo(upstream.status),
     };
   }
 
@@ -1034,6 +1035,28 @@ function finDelValor(texto: string, desde: number): number {
     }
   }
   return -1;
+}
+
+/**
+ * ¿Vale la pena preguntarle a otro modelo, o fallaria igual?
+ *
+ * Antes solo el 429 hacia avanzar la cola de suplentes, y el 502 se devolvia
+ * tal cual al usuario con doscientos cincuenta modelos sin probar. Que es
+ * absurdo, porque el 502 dice literalmente que el fallo **no** es de la
+ * peticion: el router llego a su proveedor y el proveedor se cayo.
+ *
+ * Se pasa al siguiente cuando el fallo es del otro lado (5xx), cuando se agoto
+ * el tiempo (408) o cuando ese modelo concreto no existe (404, tipico de los
+ * alias del router, que se anuncian en /v1/models y luego no resuelven).
+ *
+ * No se pasa con 401 ni 403: la clave es la misma para todos y fallaria igual
+ * doscientas cincuenta veces. Tampoco con 400, que apunta a que lo que estamos
+ * mandando esta mal; recorrer la cola entera solo tardaria mas en decir lo
+ * mismo, y el reintento sin herramientas de mas arriba ya cubre el 400 que si
+ * depende del modelo.
+ */
+function mereceOtroModelo(status: number): boolean {
+  return status >= 500 || status === 408 || status === 404 || status === 409;
 }
 
 function describeUpstreamError(status: number, detail: string, model: string) {
