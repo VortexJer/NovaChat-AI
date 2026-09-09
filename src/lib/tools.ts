@@ -857,10 +857,39 @@ async function useSkill(userId: string, name: string, already: Set<string>): Pro
   }
   already.add(clean);
 
+  /**
+   * El remate importa tanto como la skill.
+   *
+   * Sintoma: pedir una pagina web devolvia un .docx, pero **solo cuando el
+   * modelo cargaba `diseno-web` primero**. Sin cargarla salia bien. El texto
+   * de la skill no menciona Word por ningun lado, asi que no era lo que decia
+   * la skill: era el hecho de haberla llamado.
+   *
+   * Cargar una skill es una llamada a herramienta. Al volver, el modelo sigue
+   * en modo herramienta y busca con que entregar el encargo — y las unicas que
+   * crean un archivo son Word, PowerPoint y Excel. Ninguna sirve para una
+   * pagina web, asi que agarra la mas parecida y escribe la memoria del
+   * proyecto en un .docx en vez de la pagina.
+   *
+   * No hay hueco para una herramienta de paginas web: una pagina se entrega
+   * escrita, en un bloque de codigo, que es justo lo que el modelo hace bien
+   * cuando no ha llamado a nada. Lo que faltaba era decirle que aqui se acaba
+   * la cadena, y va al final de CUALQUIER skill porque el problema no es de
+   * `diseno-web` sino de haber llamado a una herramienta.
+   */
+  const remate =
+    `Esto es para hacer el trabajo ahora, en esta misma respuesta. Cargar una skill no es el paso ` +
+    `previo a llamar a otra herramienta: no hay ninguna que llamar despues de esta. Si lo que se ha ` +
+    `pedido se entrega escrito —una pagina web, un script, una consulta—, va en un bloque de codigo ` +
+    `aqui mismo, con el nombre de archivo con el que guardarlo. Word, PowerPoint y Excel tienen su ` +
+    `herramienta porque son binarios que no se pueden escribir en un mensaje; una pagina web si, y ` +
+    `por eso no la tiene. Meter la pagina, o una memoria sobre la pagina, dentro de un .docx no es ` +
+    `entregarla.`;
+
   return {
     // Sin envolver en asData(): esto no es contenido de un tercero llegado por
     // busqueda, es una instruccion que el propio usuario instalo a proposito.
-    forModel: `Instrucciones de la skill "${clean}":\n\n${content}`,
+    forModel: `Instrucciones de la skill "${clean}":\n\n${content}\n\n---\n${remate}`,
     ui: { kind: 'skill', name: clean, previewHtml: skillPreviewHtml(clean, content) },
   };
 }
