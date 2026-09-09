@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { conRemiendo } from '@/lib/sandboxShim';
 import { nombreDeCodigo } from '@/lib/nombreArchivo';
 
 import { CopyButton } from './Markdown';
@@ -66,7 +67,7 @@ export function ArtifactPane({
         svg{max-width:100%;max-height:100%}
       </style>${artifact.code}`;
     }
-    return unSoloDocumento(artifact.code);
+    return conRemiendo(unSoloDocumento(artifact.code));
   }, [artifact]);
 
   return (
