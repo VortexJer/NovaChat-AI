@@ -23,10 +23,21 @@ export type Artifact = { lang: string; code: string; title?: string; fileId?: st
  */
 function unSoloDocumento(code: string): string {
   const limpio = code.replace(/^\s*```[a-z]*\s*$/gim, '').trim();
-  const segundo = limpio.search(/<!DOCTYPE\s+html|<html[\s>]/i);
-  if (segundo < 0) return limpio;
-  const siguiente = limpio.slice(segundo + 1).search(/<!DOCTYPE\s+html|<html[\s>]/i);
-  return siguiente < 0 ? limpio : limpio.slice(0, segundo + 1 + siguiente).trimEnd();
+
+  // Un documento acaba en </html>. Si despues de ese cierre empieza otro, se
+  // corta ahi; si no hay nada detras, se devuelve entero.
+  const cierre = limpio.match(/<\/html\s*>/i);
+  if (cierre?.index !== undefined) {
+    const fin = cierre.index + cierre[0].length;
+    return /<!DOCTYPE\s+html|<html[\s>]/i.test(limpio.slice(fin)) ? limpio.slice(0, fin) : limpio;
+  }
+
+  // Sin cierre no se puede saber donde acaba el primero, salvo que aparezca un
+  // segundo <!doctype: eso no puede ser otra cosa que el principio de otro.
+  const dobles = [...limpio.matchAll(/<!DOCTYPE\s+html/gi)];
+  if (dobles.length > 1 && dobles[1].index !== undefined) return limpio.slice(0, dobles[1].index).trimEnd();
+
+  return limpio;
 }
 
 /** Lenguajes que se pueden enseñar renderizados y no solo como texto. */
