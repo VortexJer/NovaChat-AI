@@ -879,19 +879,61 @@ async function useSkill(userId: string, name: string, already: Set<string>): Pro
  */
 const EXT_DE_CODIGO = /\.(html?|css|jsx?|tsx?|json|ya?ml|toml|sql|sh|bat|ps1|py|rb|php|go|rs|java|c|cpp|cs|xml|svg|csv|txt|md)$/i;
 
-function rechazarSiEsCodigo(titulo: string, formato: string): ToolResult | null {
-  const m = titulo.trim().match(EXT_DE_CODIGO);
-  if (!m) return null;
+/**
+ * Lo mismo, pero mirando el CUERPO en vez del nombre.
+ *
+ * El guardian de arriba solo salta si el modelo bautiza el archivo con su
+ * extension de verdad. Basta con que lo llame "Cafe de la Plaza" y meta la
+ * pagina dentro para que no se entere — y eso es justo lo que seguia pasando.
+ * El nombre es una pista; el contenido es el hecho.
+ *
+ * `contenido` esta documentado como Markdown, asi que esto no interpreta el
+ * tema ni busca palabras: comprueba que la forma sea la que se pidio. Un
+ * informe no lleva <!doctype>, y un documento cuyo cuerpo entero es una valla
+ * de codigo no es un documento, es un archivo disfrazado.
+ *
+ * Los umbrales dejan pasar lo que si es legitimo: una guia de despliegue con
+ * su bloque de `npm install` es prosa con codigo dentro, no codigo. Por eso la
+ * valla tiene que ocupar mas de la mitad, y las etiquetas sueltas mas del 15%.
+ */
+function pareceCodigo(contenido: string): string | null {
+  const t = contenido.trim();
+  if (!t) return null;
+
+  // Estructura de documento HTML completo: inequivoco.
+  if (/^\s*<!doctype\s+html/i.test(t)) return 'html';
+  if (/<html[\s>]/i.test(t) || /<body[\s>]/i.test(t) || /<head[\s>]/i.test(t)) return 'html';
+
+  // El documento ES un bloque de codigo.
+  const vallas = [...t.matchAll(/```([A-Za-z0-9+#-]*)\n([\s\S]*?)```/g)];
+  const dentro = vallas.reduce((n, m) => n + m[0].length, 0);
+  if (vallas.length && dentro > t.length * 0.5) return vallas[0][1].toLowerCase() || 'codigo';
+
+  // Markup suelto sin <html>: un <div> gigante troceado en tarjetas.
+  const etiquetas = [...t.matchAll(/<\/?[a-z][a-z0-9]*(\s[^<>]*)?>/gi)];
+  const ocupan = etiquetas.reduce((n, m) => n + m[0].length, 0);
+  if (etiquetas.length >= 8 && ocupan > t.length * 0.15) return 'html';
+
+  return null;
+}
+
+function rechazarSiEsCodigo(titulo: string, formato: string, contenido?: string): ToolResult | null {
+  const porNombre = titulo.trim().match(EXT_DE_CODIGO)?.[1];
+  const tipo = porNombre ?? (contenido ? pareceCodigo(contenido) : null);
+  if (!tipo) return null;
+  const comoSeLlamo = porNombre
+    ? `Has llamado a este archivo "${titulo.trim()}", asi que lo`
+    : `El cuerpo que has pasado no es Markdown, es ${tipo}, asi que lo`;
   return {
     forModel:
-      `Has llamado a este archivo "${titulo.trim()}", asi que lo que hay que entregar es un ${m[1].toLowerCase()}, no un ${formato}. ` +
-      `Se entrega en aquello con lo que se va a usar: un ${m[1].toLowerCase()} se abre en su programa o en el navegador, y metido dentro de un ${formato} habria que sacarlo copiando y pegando. ` +
+      `${comoSeLlamo} que hay que entregar es un ${tipo.toLowerCase()}, no un ${formato}. ` +
+      `Se entrega en aquello con lo que se va a usar: un ${tipo.toLowerCase()} se abre en su programa o en el navegador, y metido dentro de un ${formato} habria que sacarlo copiando y pegando. ` +
       `No vuelvas a llamar a esta herramienta: responde con el contenido en un bloque de codigo, indicando el nombre de archivo con el que guardarlo.`,
   };
 }
 
 async function makeDocx(ctx: FileCtx, titulo: string, contenido: string, subtitulo?: string): Promise<ToolResult> {
-  const noVa = rechazarSiEsCodigo(titulo, 'documento de Word');
+  const noVa = rechazarSiEsCodigo(titulo, 'documento de Word', contenido);
   if (noVa) return noVa;
 
   const file = await createWordDocument(titulo, contenido, subtitulo);
