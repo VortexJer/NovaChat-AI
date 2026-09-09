@@ -281,6 +281,21 @@ Una baraja de seis diapositivas bien montada usa tres o cuatro formas distintas,
 
 **Estructura como informacion, no decoracion**: si usas numeros (01/02/03), lineas divisorias o marcadores, que reflejen algo real del contenido (pasos de un proceso, una linea de tiempo) — no los añadas porque "quedan bien".
 
+**Cuando la tengas terminada, pasala por \`revisar_pagina\` antes de entregarla**: le das el HTML completo y devuelve los fallos que se ven al abrirla pero no al leerla. Corrige lo que salga y entrega la pagina ya arreglada. Es la ultima llamada antes de responder, no un paso opcional.
+
+**El color se justifica en una linea**: al entregar, di de donde sale la paleta — que del tema, no de la categoria. "Pizarra y verde-agua porque un torrente es agua fria sobre piedra" es una razon; "tonos calidos porque es un restaurante" no lo es, es la categoria otra vez. Si al escribir esa linea no sale ninguna razon que no sea el rubro, la paleta no esta decidida: esta copiada. Nombra las variables de CSS por el motivo (\`--piedra-mojada\`) y no por el ingrediente evidente, que es la misma trampa con otro nombre.
+
+**Repasa estos seis antes de entregar — son reales, salieron todos de una misma pagina que parecia impecable leyendo el codigo**:
+
+- **Ninguna regla que coloque va sobre una etiqueta desnuda.** \`header { position: fixed; top: 0 }\` parece que apunta a la barra de navegacion, pero una pagina tiene varios \`<header>\`: el del menu y el de cada seccion. Los clava todos arriba, unos encima de otros. Medido en la pagina de un restaurante: cuatro \`<header>\` en \`top:0\` con el mismo z-index, quince solapamientos de texto y **la navegacion entera tapada al 100%**. Lo mismo con \`section\`, \`nav\`, \`article\` y \`aside\`: si la regla fija, mueve o superpone, va sobre una clase.
+- **Cada ancla del menu tiene que existir.** "Nuestra ruta" apuntaba a \`#especias\` y en la pagina no habia ningun \`id="especias"\`. Comprueba que para cada \`href="#algo"\` exista su \`id\`.
+- **La accion principal lleva a un sitio real**: un \`tel:\`, un \`mailto:\`, una URL o un ancla que exista. \`href="#"\` en el boton del que depende toda la conversion no es un marcador de posicion aceptable.
+- **Las cifras cuadran entre si y dicen lo que son.** En la misma pantalla: "1.600 comensales nos avalan" en la portada y "1.611 resenas verificadas" justo debajo. Ni coinciden, ni son lo mismo: una resena no es un comensal.
+- **Nada se repite en dos secciones con datos distintos.** Butter Chicken, Chicken Korma y Garlic Nan salian dos veces, cada vez con su propia descripcion. Quien lee no sabe cual vale.
+- **Todo lo inventado marcado, no solo lo primero.** Seis precios inventados y un unico comentario \`<!-- MUESTRA -->\` es peor que ninguno: da a entender que los otros cinco son de verdad.
+
+Los seis pasan una lectura del codigo sin despeinarse y saltan a la vista en cuanto la pagina se dibuja. Si el encargo es largo, repasa la lista a proposito: no salen solos.
+
 **Accesibilidad como base, no como extra**: contraste suficiente, foco de teclado visible, que la pagina responda bien en movil sin que haya que decirlo explicitamente.`,
   },
 ];

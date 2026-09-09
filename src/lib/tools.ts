@@ -1,4 +1,5 @@
 import { ready, sql } from './db';
+import { revisarHtml, type Aviso } from './revisarWeb';
 import { saveArtifact, type ArtifactKind } from './artifacts';
 import { skillPreviewHtml } from './mdPreview';
 import {
@@ -104,6 +105,32 @@ const IMAGE_SEARCH: ToolSpec = {
         cantidad: { type: 'integer', description: 'Cuantas imagenes por consulta, entre 1 y 10. Por defecto 4.' },
       },
       required: ['consultas'],
+    },
+  },
+};
+
+/**
+ * El revisor, ofrecido siempre: no depende de ninguna clave.
+ *
+ * Cargar una skill deja al modelo en modo herramienta — eso ya se aprendio por
+ * las malas con el .docx — y aqui juega a favor: la skill de diseno web le
+ * dice que termine pasando la pagina por aqui, y viene predispuesto a hacerlo.
+ */
+const REVIEW_PAGE: ToolSpec = {
+  type: 'function',
+  function: {
+    name: 'revisar_pagina',
+    description:
+      'Revisa el HTML de una pagina terminada y devuelve los fallos que se ven al abrirla pero no al ' +
+      'leer el codigo: reglas de CSS puestas sobre etiquetas desnudas que colocan media pagina donde no ' +
+      'toca, enlaces del menu que no llevan a ninguna parte, contenido repetido con datos distintos. ' +
+      'Pasa por aqui toda pagina antes de entregarla, y corrige lo que devuelva.',
+    parameters: {
+      type: 'object',
+      properties: {
+        html: { type: 'string', description: 'El HTML completo de la pagina, tal cual se va a entregar.' },
+      },
+      required: ['html'],
     },
   },
 };
@@ -385,7 +412,7 @@ export async function availableTools(userId: string): Promise<ToolSpec[]> {
     listSkills(userId),
   ]);
 
-  const tools: ToolSpec[] = [CREATE_DOCX, CREATE_PPTX, CREATE_XLSX, SEARCH_HISTORY];
+  const tools: ToolSpec[] = [CREATE_DOCX, CREATE_PPTX, CREATE_XLSX, SEARCH_HISTORY, REVIEW_PAGE];
   if (tavily || jina) tools.push(WEB_SEARCH, READ_PAGE);
   if (pexels || unsplash || pixabay) tools.push(IMAGE_SEARCH);
   if (skills.length) tools.push(skillTool(skills));
@@ -455,6 +482,38 @@ function unaCadena(v: unknown): string {
   return '';
 }
 
+/**
+ * Pasa la pagina por el revisor y cuenta lo que ha salido.
+ *
+ * Los graves van primero y con su nombre, porque son los que dejan la pagina
+ * rota de verdad. Si no hay nada se dice claramente: un "todo correcto" es una
+ * respuesta util, y si se devolviera vacio el modelo podria leerlo como que la
+ * herramienta ha fallado y ponerse a arreglar lo que no esta roto.
+ */
+function revisarPagina(html: string): ToolResult {
+  if (!html.trim()) return { forModel: 'No se ha pasado ningun HTML que revisar.' };
+
+  const avisos = revisarHtml(html);
+  if (!avisos.length) {
+    return { forModel: 'Revision hecha: no se ha encontrado ningun fallo de los que se comprueban. Entrega la pagina.' };
+  }
+
+  const graves = avisos.filter((a) => a.grave);
+  const leves = avisos.filter((a) => !a.grave);
+  const linea = (a: { que: string }) => `- ${a.que}`;
+
+  const bloque = (titulo: string, lista: Aviso[]) =>
+    lista.length ? [titulo, ...lista.map(linea)].join('\n') + '\n\n' : '';
+
+  return {
+    forModel:
+      `Revision de la pagina — ${graves.length} fallo(s) grave(s) y ${leves.length} aviso(s).\n\n` +
+      bloque('GRAVES (rompen la pagina en cuanto se abre):', graves) +
+      bloque('AVISOS:', leves) +
+      `Corrige esto y vuelve a entregar la pagina entera ya arreglada. No hace falta volver a pasarla por aqui si los cambios son solo los que se piden.`,
+  };
+}
+
 export async function runTool(
   userId: string,
   name: string,
@@ -469,6 +528,8 @@ export async function runTool(
         return await webSearch(userId, String(args.consulta ?? ''), args.profundidad === 'profunda');
       case 'buscar_imagenes':
         return await imageSearch(userId, consultasDe(args), clamp(Number(args.cantidad) || 4, 1, 10));
+      case 'revisar_pagina':
+        return revisarPagina(String(args.html ?? args.codigo ?? args.pagina ?? ''));
       case 'leer_pagina':
         return await readPage(userId, String(args.url ?? ''));
       case 'buscar_historial':
