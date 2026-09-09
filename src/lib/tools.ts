@@ -86,14 +86,24 @@ const IMAGE_SEARCH: ToolSpec = {
   type: 'function',
   function: {
     name: 'buscar_imagenes',
-    description: 'Busca fotografias libres de derechos y las muestra en una rejilla en la interfaz.',
+    description:
+      'Busca fotografias libres de derechos y las muestra en una rejilla en la interfaz. ' +
+      'Admite VARIAS busquedas de una vez: si la pagina necesita cuatro fotos distintas, pidelas ' +
+      'las cuatro en esta misma llamada en vez de llamar cuatro veces. Se resuelven en paralelo y ' +
+      'se ahorra una vuelta entera por cada consulta de mas.',
     parameters: {
       type: 'object',
       properties: {
-        consulta: { type: 'string', description: 'Que se busca. En ingles suele dar mejores resultados.' },
-        cantidad: { type: 'integer', description: 'Cuantas imagenes, entre 1 y 10. Por defecto 4.' },
+        consultas: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Que se busca, una entrada por foto que haga falta (maximo 6). En ingles suele dar ' +
+            'mejores resultados. Ejemplo: ["indian tandoor oven", "butter chicken dish", "restaurant interior warm light"].',
+        },
+        cantidad: { type: 'integer', description: 'Cuantas imagenes por consulta, entre 1 y 10. Por defecto 4.' },
       },
-      required: ['consulta'],
+      required: ['consultas'],
     },
   },
 };
@@ -406,6 +416,45 @@ export async function availableTools(userId: string): Promise<ToolSpec[]> {
 
 type Args = Record<string, unknown>;
 
+/**
+ * Las consultas de imagenes, venga como venga.
+ *
+ * El esquema pide un array, pero no todos los modelos del router lo respetan:
+ * unos mandan `consulta` en singular con una cadena, otros el array serializado
+ * como texto, y alguno una lista de objetos {consulta: "..."}. Aceptar las
+ * cuatro formas cuesta diez lineas y evita que la herramienta conteste "no se
+ * ha dado ninguna consulta" cuando el modelo si la ha dado.
+ */
+function consultasDe(args: Record<string, unknown>): string[] {
+  const bruto = args.consultas ?? args.consulta ?? args.queries ?? args.query;
+  if (typeof bruto === 'string') {
+    const t = bruto.trim();
+    // Un array serializado como texto: '["a","b"]'.
+    if (t.startsWith('[')) {
+      try {
+        const v = JSON.parse(t);
+        if (Array.isArray(v)) return v.map(unaCadena).filter(Boolean);
+      } catch {
+        // No era JSON; se toma como una consulta normal.
+      }
+    }
+    return t ? [t] : [];
+  }
+  if (Array.isArray(bruto)) return bruto.map(unaCadena).filter(Boolean);
+  return [];
+}
+
+/** Una entrada de la lista: cadena suelta, u objeto con la consulta dentro. */
+function unaCadena(v: unknown): string {
+  if (typeof v === 'string') return v.trim();
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    const dentro = o.consulta ?? o.query ?? o.texto ?? o.q;
+    if (typeof dentro === 'string') return dentro.trim();
+  }
+  return '';
+}
+
 export async function runTool(
   userId: string,
   name: string,
@@ -419,7 +468,7 @@ export async function runTool(
       case 'buscar_web':
         return await webSearch(userId, String(args.consulta ?? ''), args.profundidad === 'profunda');
       case 'buscar_imagenes':
-        return await imageSearch(userId, String(args.consulta ?? ''), clamp(Number(args.cantidad) || 4, 1, 10));
+        return await imageSearch(userId, consultasDe(args), clamp(Number(args.cantidad) || 4, 1, 10));
       case 'leer_pagina':
         return await readPage(userId, String(args.url ?? ''));
       case 'buscar_historial':
@@ -731,52 +780,49 @@ async function searchHistory(
   };
 }
 
-async function imageSearch(userId: string, query: string, count: number): Promise<ToolResult> {
-  if (!query.trim()) return { forModel: 'La consulta estaba vacia.' };
+type Foto = { url: string; thumb: string; credit: string; page: string };
 
-  const [pexels, unsplash, pixabay] = await Promise.all([
-    getKey(userId, 'pexels'),
-    getKey(userId, 'unsplash'),
-    getKey(userId, 'pixabay'),
-  ]);
-
-  if (pexels) {
+/**
+ * Una consulta contra el primer proveedor que tenga clave y conteste.
+ *
+ * Las claves llegan de fuera, ya resueltas: antes se pedian dentro de la
+ * funcion y con varias consultas eso eran tres lecturas por consulta.
+ */
+async function unaBusqueda(
+  query: string,
+  count: number,
+  keys: { pexels?: string | null; unsplash?: string | null; pixabay?: string | null },
+): Promise<{ fuente: string; fotos: Foto[] } | null> {
+  if (keys.pexels) {
     const res = await fetch(
       `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=${count}`,
-      { headers: { Authorization: pexels }, signal: AbortSignal.timeout(20_000) },
-    );
-    if (res.ok) {
+      { headers: { Authorization: keys.pexels }, signal: AbortSignal.timeout(20_000) },
+    ).catch(() => null);
+    if (res?.ok) {
       const data = (await res.json()) as {
         photos?: { alt: string; photographer: string; url: string; src: { large: string; medium: string } }[];
       };
       const photos = data.photos ?? [];
       if (photos.length) {
         return {
-          forModel: asData(
-            'imagenes (Pexels)',
-            photos.map((p) => `- ${p.alt || query} — foto de ${p.photographer}\n  ${p.src.large}`).join('\n'),
-          ),
-          ui: {
-            kind: 'images',
-            query,
-            items: photos.map((p) => ({
-              url: p.src.large,
-              thumb: p.src.medium,
-              credit: p.photographer,
-              page: p.url,
-            })),
-          },
+          fuente: 'Pexels',
+          fotos: photos.map((p) => ({
+            url: p.src.large,
+            thumb: p.src.medium,
+            credit: p.photographer,
+            page: p.url,
+          })),
         };
       }
     }
   }
 
-  if (unsplash) {
+  if (keys.unsplash) {
     const res = await fetch(
       `https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&per_page=${count}`,
-      { headers: { Authorization: `Client-ID ${unsplash}` }, signal: AbortSignal.timeout(20_000) },
-    );
-    if (res.ok) {
+      { headers: { Authorization: `Client-ID ${keys.unsplash}` }, signal: AbortSignal.timeout(20_000) },
+    ).catch(() => null);
+    if (res?.ok) {
       const data = (await res.json()) as {
         results?: {
           alt_description: string;
@@ -788,57 +834,105 @@ async function imageSearch(userId: string, query: string, count: number): Promis
       const results = data.results ?? [];
       if (results.length) {
         return {
-          forModel: asData(
-            'imagenes (Unsplash)',
-            results.map((p) => `- ${p.alt_description || query} — foto de ${p.user.name}\n  ${p.urls.regular}`).join('\n'),
-          ),
-          ui: {
-            kind: 'images',
-            query,
-            items: results.map((p) => ({
-              url: p.urls.regular,
-              thumb: p.urls.small,
-              credit: p.user.name,
-              page: p.links.html,
-            })),
-          },
+          fuente: 'Unsplash',
+          fotos: results.map((p) => ({
+            url: p.urls.regular,
+            thumb: p.urls.small,
+            credit: p.user.name,
+            page: p.links.html,
+          })),
         };
       }
     }
   }
 
-  if (pixabay) {
+  if (keys.pixabay) {
     const res = await fetch(
-      `https://pixabay.com/api/?key=${encodeURIComponent(pixabay)}&q=${encodeURIComponent(query)}&per_page=${Math.max(3, count)}`,
+      `https://pixabay.com/api/?key=${encodeURIComponent(keys.pixabay)}&q=${encodeURIComponent(query)}&per_page=${Math.max(3, count)}`,
       { signal: AbortSignal.timeout(20_000) },
-    );
-    if (res.ok) {
+    ).catch(() => null);
+    if (res?.ok) {
       const data = (await res.json()) as {
         hits?: { tags: string; user: string; largeImageURL: string; webformatURL: string; pageURL: string }[];
       };
       const hits = (data.hits ?? []).slice(0, count);
       if (hits.length) {
         return {
-          forModel: asData(
-            'imagenes (Pixabay)',
-            hits.map((p) => `- ${p.tags} — foto de ${p.user}\n  ${p.largeImageURL}`).join('\n'),
-          ),
-          ui: {
-            kind: 'images',
-            query,
-            items: hits.map((p) => ({
-              url: p.largeImageURL,
-              thumb: p.webformatURL,
-              credit: p.user,
-              page: p.pageURL,
-            })),
-          },
+          fuente: 'Pixabay',
+          fotos: hits.map((p) => ({
+            url: p.largeImageURL,
+            thumb: p.webformatURL,
+            credit: p.user,
+            page: p.pageURL,
+          })),
         };
       }
     }
   }
 
-  return { forModel: 'No hay ningun proveedor de imagenes disponible o todos han fallado.' };
+  return null;
+}
+
+/**
+ * Varias consultas de imagenes en una sola llamada.
+ *
+ * Una pagina web necesita normalmente cuatro o cinco fotos distintas \u2014 la
+ * cabecera, dos platos, el local \u2014 y con una consulta por llamada eso eran
+ * cuatro vueltas enteras al modelo. Cada vuelta del router tarda entre diez y
+ * cincuenta segundos y gasta cupo, asi que el coste no estaba en la API de
+ * fotos sino en volver a preguntarle al modelo cuatro veces lo que ya sabia de
+ * antemano: que necesitaba esas cuatro fotos.
+ *
+ * Ahora las pide todas juntas y se resuelven en paralelo. Cuatro consultas
+ * pasan de cuatro vueltas y cuatro peticiones en serie, a una vuelta y cuatro
+ * peticiones a la vez.
+ *
+ * Las consultas se deduplican antes de salir: pedir "indian food" dos veces en
+ * la misma tanda es facil y no tiene sentido pagarlo dos veces.
+ */
+async function imageSearch(userId: string, consultas: string[], count: number): Promise<ToolResult> {
+  const limpias = [...new Set(consultas.map((c) => c.trim()).filter(Boolean))].slice(0, 6);
+  if (!limpias.length) return { forModel: 'No se ha dado ninguna consulta.' };
+
+  const [pexels, unsplash, pixabay] = await Promise.all([
+    getKey(userId, 'pexels'),
+    getKey(userId, 'unsplash'),
+    getKey(userId, 'pixabay'),
+  ]);
+  if (!pexels && !unsplash && !pixabay) {
+    return { forModel: 'No hay ningun proveedor de imagenes configurado.' };
+  }
+
+  const keys = { pexels, unsplash, pixabay };
+  const tandas = await Promise.all(limpias.map((q) => unaBusqueda(q, count, keys)));
+
+  const bloques: string[] = [];
+  const items: Foto[] = [];
+  const vacias: string[] = [];
+
+  limpias.forEach((q, i) => {
+    const t = tandas[i];
+    if (!t) {
+      vacias.push(q);
+      return;
+    }
+    bloques.push(
+      `${q} (${t.fuente}):\n` + t.fotos.map((p) => `- foto de ${p.credit}\n  ${p.url}`).join('\n'),
+    );
+    items.push(...t.fotos);
+  });
+
+  if (!items.length) {
+    return { forModel: `Sin resultados para: ${limpias.join(', ')}.` };
+  }
+
+  // El aviso va fuera del bloque de datos: es nuestro, no del proveedor.
+  const nota = vacias.length ? `\n\nSin resultados para: ${vacias.join(', ')}.` : '';
+
+  return {
+    forModel: asData('imagenes', bloques.join('\n\n')) + nota,
+    ui: { kind: 'images', query: limpias.join(' · '), items },
+  };
 }
 
 async function useSkill(userId: string, name: string, already: Set<string>): Promise<ToolResult> {
