@@ -1,8 +1,15 @@
 name: NovaChat app
 
-# Compila NovaChat y publica la imagen en el GHCR privado del repositorio.
-# Render tira de la etiqueta `:latest`, asi que cada push a main que toque
-# codigo deja lista la imagen que despues se despliega a mano.
+# Compila NovaChat, publica la imagen en el GHCR privado del repositorio y
+# manda a Render que la despliegue.
+#
+# El despliegue era a mano, y se notaba: durante dos dias se arreglaron fallos
+# que seguian apareciendo en produccion porque la imagen estaba compilada pero
+# nadie la habia desplegado. Un push ya no deja el trabajo a medias.
+#
+# Hace falta el secreto RENDER_DEPLOY_HOOK (Render > el servicio > Settings >
+# Deploy Hook). Sin el, la imagen se publica igual y el resumen avisa de que
+# queda el paso manual: asi el workflow nunca falla por no tenerlo configurado.
 
 on:
   workflow_dispatch:
@@ -64,9 +71,27 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Desplegar en Render
+        id: deploy
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "estado=Falta el secreto RENDER_DEPLOY_HOOK: la imagen esta publicada, pero hay que desplegarla a mano." >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          # -f para que un 4xx/5xx del hook rompa la compilacion en vez de
+          # dejar pasar un despliegue que no ha ocurrido; -sS calla la barra de
+          # progreso pero no los errores. La respuesta lleva el id del deploy y
+          # no se imprime: la URL del hook es un secreto y no conviene
+          # arriesgarse a que algo de la respuesta la refleje.
+          curl -fsS -X POST "$HOOK" -o /dev/null
+          echo "estado=Despliegue lanzado en Render." >> $GITHUB_OUTPUT
+
       - name: Resumen
         run: |
           echo "### Imagen de NovaChat publicada" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.deploy.outputs.estado }}" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
