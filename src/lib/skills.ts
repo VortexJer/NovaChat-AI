@@ -264,6 +264,8 @@ Una baraja de seis diapositivas bien montada usa tres o cuatro formas distintas,
 
 **Movil es rediseno, no encogimiento**: una tabla ancha se convierte en bloques con su etiqueta encima, la navegacion pasa a una fila completa, las areas tactiles suben a unos 44 px y lo que estaba escalonado se endereza. Si en movil solo cambia el tamano de la letra, no esta resuelto.
 
+**Fotos de verdad cuando aporten**: si la pagina pide imagenes —un plato, un local, un producto, un equipo trabajando— y tienes herramienta de busqueda de imagenes, usala y pon las URL que devuelve en los \`<img>\`, con el credito del autor donde corresponda. El recuadro gris con un icono es lo que se pone cuando no hay nada mejor, no la primera opcion. Pero juzgalo: una foto de archivo generica de "comida india" en la web de un restaurante concreto es peor que un hueco honesto y bien marcado, porque promete algo que no es. Si no hay proveedor configurado, o lo que vuelve no encaja con el tema de verdad, deja el hueco senalado y dilo en una linea.
+
 **Marca lo que te has inventado**: precios, telefonos, direcciones, horarios y resenas que no te han dado son de muestra. Dejalos puestos para que la pagina se vea entera, senalados con un comentario HTML, y di en una linea al final cuales hay que sustituir. Ni dejar huecos vacios ni colar datos falsos como si fueran reales.
 
 **Evita estos rasgos por defecto — son la señal mas clara de que algo lo genero una IA sin pensarlo**:

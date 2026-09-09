@@ -878,13 +878,13 @@ async function useSkill(userId: string, name: string, already: Set<string>): Pro
    * `diseno-web` sino de haber llamado a una herramienta.
    */
   const remate =
-    `Esto es para hacer el trabajo ahora, en esta misma respuesta. Cargar una skill no es el paso ` +
-    `previo a llamar a otra herramienta: no hay ninguna que llamar despues de esta. Si lo que se ha ` +
-    `pedido se entrega escrito —una pagina web, un script, una consulta—, va en un bloque de codigo ` +
-    `aqui mismo, con el nombre de archivo con el que guardarlo. Word, PowerPoint y Excel tienen su ` +
-    `herramienta porque son binarios que no se pueden escribir en un mensaje; una pagina web si, y ` +
-    `por eso no la tiene. Meter la pagina, o una memoria sobre la pagina, dentro de un .docx no es ` +
-    `entregarla.`;
+    `Esto es para hacer el trabajo ahora. Si lo que se ha pedido se entrega escrito —una pagina web, ` +
+    `un script, una consulta—, va en un bloque de codigo en la respuesta, con el nombre de archivo ` +
+    `con el que guardarlo. Word, PowerPoint y Excel tienen herramienta porque son binarios que no se ` +
+    `pueden escribir en un mensaje; una pagina web si, y por eso no la tiene. Meter la pagina, o una ` +
+    `memoria sobre la pagina, dentro de un .docx no es entregarla. ` +
+    `Las de buscar —web, imagenes, leer una pagina— son otra cosa y si conviene llamarlas: sirven ` +
+    `para traer material de verdad al trabajo que se esta haciendo.`;
 
   return {
     // Sin envolver en asData(): esto no es contenido de un tercero llegado por
