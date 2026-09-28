@@ -1,5 +1,10 @@
 # NovaChat
 
+> **English summary** — Self-built AI chat client (Next.js + PostgreSQL, no agent framework): own streaming tool loop, hand-written MCP client, web search and `.docx`/`.pptx`/`.xlsx` generation. Deployed with Docker → GHCR → Render.
+
+![NovaChat building a website with its tools](docs/screenshot.jpg)
+
+
 Cliente de chat propio, escrito desde cero. Next.js (App Router) + Postgres, sin
 framework de agentes por debajo: el bucle de herramientas, el prompt de sistema,
 las skills y la generación de documentos son código de este repositorio.
